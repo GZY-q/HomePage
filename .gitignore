@@ -1,6 +1,8 @@
 # 后端运行时数据（不入库）
 data/sessions.json
 data/stats.json
+data/audit.log
+data/agent-logs-*.json
 data/backups/
 uploads/*
 !uploads/.gitkeep

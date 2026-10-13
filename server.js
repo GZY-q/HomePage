@@ -14,7 +14,15 @@
    - GET  /api/stats    近 30 天访问统计（鉴权）
    - GET  /api/backups  备份历史列表（鉴权，最近 20 份）
    - POST /api/restore  恢复到指定备份（鉴权；恢复前会把当前内容再备份一份）
-   - GET  /api/health   健康检查
+   - GET  /api/health   健康检查（含版本 / 运行时长 / memo 与任务计数）
+   - /api/memos*        备忘录：列表 / 标签云 / 单条 / 创建 / 更新 / 删除 / 分享链接
+                        （写操作鉴权 + 备份 + 原子写入 + 审计；私密备忘支持 share 令牌免登录查看）
+
+   底座：
+   - global.GBEvent      全局事件总线（内容更新、备份恢复时 emit "post:update"）
+   - global.GBAgentLogs  agent 运行日志读写（按月切割为 data/agent-logs-YYYY-MM.json，
+                         每月最多 500 条，自动清理 90 天前的旧文件）
+   - data/audit.log      审计日志（登录 / 注销 / 内容保存 / 上传 / 恢复，按行 JSON）
    - GET  /rss.xml      RSS 订阅（参考 Hexo 由内容自动生成）
    - GET  /blog.html?p=<slug>
                         文章页服务端注入 og:/twitter: meta（爬虫不执行 JS，
@@ -43,6 +51,8 @@ const CONTENT_FILE = path.join(ROOT, "data", "content.json");
 const SESSIONS_FILE = path.join(ROOT, "data", "sessions.json");
 const STATS_FILE = path.join(ROOT, "data", "stats.json");
 const BACKUP_DIR = path.join(ROOT, "data", "backups");
+const AUDIT_LOG = path.join(ROOT, "data", "audit.log");
+const AGENT_LOGS_DIR = path.join(ROOT, "data");
 
 // 上传白名单与大小限制（参考常见开源 CMS 的分目录策略）
 const UPLOAD_DIRS = {
@@ -87,6 +97,21 @@ function flushWrites() {
   }
 }
 
+/* 原子写入：先写临时文件再 rename，避免写入中断产生半个 JSON */
+function writeContent(filePath, data) {
+  const tmp = filePath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, filePath);
+}
+
+/* ---------- 全局事件总线（供后续 agent / memo 等模块订阅内容变更） ---------- */
+const GBEvent = {
+  _h: {},
+  on(e, fn) { (this._h[e] = this._h[e] || []).push(fn); },
+  emit(e, d) { (this._h[e] || []).forEach((f) => { try { f(d); } catch (err) { console.error(`[GBEvent] ${e} 处理异常:`, err); } }); },
+};
+global.GBEvent = GBEvent;
+
 /* ---------- 会话令牌（有效期滑动续期） ---------- */
 function tokenOf(req) {
   const m = /^Bearer (\S+)$/.exec(req.headers.authorization || "");
@@ -110,6 +135,15 @@ function authOK(req) {
   return true;
 }
 
+/* 通用鉴权中间件：未登录统一回 401，返回 false 时调用方直接 return */
+function authRequired(req, res) {
+  if (!authOK(req)) {
+    sendJSON(req, res, 401, { error: "未登录" });
+    return false;
+  }
+  return true;
+}
+
 /* ---------- 登录防爆破（内存态，重启清零） ---------- */
 const loginFails = new Map(); // ip -> { count, lockUntil }
 function clientIP(req) {
@@ -125,6 +159,33 @@ function recordLoginFail(ip) {
   if (r.count >= 5) { r.count = 0; r.lockUntil = Date.now() + 10 * 60e3; } // 锁 10 分钟
   loginFails.set(ip, r);
 }
+
+/* ---------- 审计日志（按行 JSON 追加到 data/audit.log） ---------- */
+function auditLog(action, req, target) {
+  const entry = JSON.stringify({ t: new Date().toISOString(), ip: clientIP(req), action, target }) + "\n";
+  fs.appendFileSync(AUDIT_LOG, entry);
+}
+
+/* ---------- agent 运行日志（按月切割，每月最多 500 条，保留 90 天） ---------- */
+function agentLogFile() {
+  const m = new Date().toISOString().slice(0, 7); // "2026-10"
+  return path.join(AGENT_LOGS_DIR, `agent-logs-${m}.json`);
+}
+function readAgentLogs() { return readJSON(agentLogFile(), []); }
+function writeAgentLog(entry) {
+  const file = agentLogFile();
+  const logs = readJSON(file, []);
+  logs.unshift(entry); // 最新在前
+  if (logs.length > 500) logs.length = 500; // 每月最多 500 条
+  writeContent(file, logs);
+  // 清理 90 天前的旧日志
+  try {
+    const cutoff = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 7);
+    fs.readdirSync(AGENT_LOGS_DIR).filter((f) => f.startsWith("agent-logs-") && f.slice(11, 18) < cutoff)
+      .forEach((f) => fs.unlinkSync(path.join(AGENT_LOGS_DIR, f)));
+  } catch {}
+}
+global.GBAgentLogs = { readAgentLogs, writeAgentLog }; // 供后续 agent 模块使用
 
 /* ---------- 访问统计（隐私友好，参考 Plausible/Umami 思路） ---------- */
 let stats = readJSON(STATS_FILE, {}); // { "2026-10-12": { "/": 3 } }
@@ -328,7 +389,170 @@ const server = http.createServer(async (req, res) => {
 
   try {
     /* ===== API ===== */
-    if (p === "/api/health") return sendJSON(req, res, 200, { ok: true });
+    if (p === "/api/health") {
+      const data = readJSON(CONTENT_FILE, {});
+      return sendJSON(req, res, 200, {
+        ok: true, version: GBSchema.SCHEMA_VERSION, uptime: process.uptime(),
+        memos: (data.memos || []).length, tasks: (data.agentTasks || []).length,
+      });
+    }
+
+    /* ===== 备忘录 API =====
+       GET    /api/memos              列表（未登录仅 public；支持 tag/q/from/to/includeArchived 筛选）
+       GET    /api/memos/tags         标签云（未登录只统计 public）
+       GET    /api/memos/:id          单条详情（私密需登录，或 ?share=有效令牌）
+       POST   /api/memos              创建（鉴权）
+       PUT    /api/memos/:id          更新（鉴权，rev 乐观锁）
+       DELETE /api/memos/:id          删除（鉴权）
+       POST   /api/memos/:id/share    生成分享链接（鉴权，expireHours 默认 24） */
+    const memoMatch = p.match(/^\/api\/memos(?:\/([^/]+))?(?:\/(share))?$/);
+    if (memoMatch) {
+      const memoId = memoMatch[1] ? decodeURIComponent(memoMatch[1]) : null;
+      const isShare = memoMatch[2] === "share";
+      const authed = authOK(req); // 只判断登录态，是否强制 401 由各接口自行决定
+
+      /* 标签云（需先于 :id 分支匹配，避免 "tags" 被当成备忘 id） */
+      if (memoId === "tags" && !isShare && req.method === "GET") {
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        const counts = {};
+        (data.memos || [])
+          .filter((m) => authed || m.visibility === "public")
+          .forEach((m) => (m.tags || []).forEach((t) => { counts[t] = (counts[t] || 0) + 1; }));
+        const tags = Object.entries(counts).map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count);
+        return sendJSON(req, res, 200, { tags });
+      }
+
+      /* 列表：置顶优先，其余按创建时间倒序 */
+      if (!memoId && req.method === "GET") {
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        let list = (data.memos || []).slice();
+        // 未登录仅公开；已登录默认排除归档（?includeArchived=true 时包含）
+        if (!authed) list = list.filter((m) => m.visibility === "public");
+        else if (url.searchParams.get("includeArchived") !== "true") list = list.filter((m) => !m.archived);
+        const tag = url.searchParams.get("tag");
+        if (tag) list = list.filter((m) => (m.tags || []).includes(tag));
+        const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+        if (q) list = list.filter((m) => String(m.content || "").toLowerCase().includes(q));
+        const from = url.searchParams.get("from"); // YYYY-MM-DD
+        const to = url.searchParams.get("to");
+        if (from) list = list.filter((m) => String(m.createdAt || "").slice(0, 10) >= from);
+        if (to) list = list.filter((m) => String(m.createdAt || "").slice(0, 10) <= to);
+        list.sort((a, b) => (Number(b.pinned) - Number(a.pinned)) ||
+          (new Date(b.createdAt) - new Date(a.createdAt)));
+        return sendJSON(req, res, 200, { memos: list });
+      }
+
+      /* 单条详情：公开任意人可看；私密需登录，或携带有效分享令牌 */
+      if (memoId && !isShare && req.method === "GET") {
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        const memo = (data.memos || []).find((m) => m.id === memoId);
+        if (!memo) return sendJSON(req, res, 404, { error: "备忘不存在" });
+        if (authed || memo.visibility === "public") return sendJSON(req, res, 200, memo);
+        const shareToken = url.searchParams.get("share") || "";
+        const sh = memo.share || {};
+        const valid = sh.enabled && sh.token && sh.token === shareToken &&
+          (!sh.expireAt || new Date(sh.expireAt) > new Date());
+        if (valid) return sendJSON(req, res, 200, memo);
+        return sendJSON(req, res, 403, { error: "无权访问" });
+      }
+
+      /* 创建备忘 */
+      if (!memoId && req.method === "POST") {
+        if (!authRequired(req, res)) return;
+        const body = JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString() || "{}");
+        const now = GBSchema.nowISO();
+        const memo = GBSchema.normalizeMemo({
+          id: GBSchema.genId("memo"),
+          content: String(body.content || ""),
+          tags: Array.isArray(body.tags) ? body.tags : [],
+          visibility: body.visibility, // normalizeMemo 白名单兜底为 private
+          pinned: !!body.pinned,
+          archived: false,
+          attachments: [],
+          share: { enabled: false, token: "", expireAt: null },
+          createdAt: now,
+          updatedAt: now,
+          rev: 1,
+        });
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        data.memos.unshift(memo); // 最新在前
+        backupContent();
+        writeContent(CONTENT_FILE, data); // 原子写入
+        rssCache = null;                  // 内容变更，RSS / Sitemap 缓存失效
+        sitemapCache = null;
+        GBEvent.emit("memo:create", memo);
+        auditLog("memo:create", req, memo.id);
+        return sendJSON(req, res, 200, memo);
+      }
+
+      /* 更新备忘：rev 乐观锁，防多端覆盖 */
+      if (memoId && !isShare && req.method === "PUT") {
+        if (!authRequired(req, res)) return;
+        const body = JSON.parse((await readBody(req, 5 * 1024 * 1024)).toString() || "{}");
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        const memo = (data.memos || []).find((m) => m.id === memoId);
+        if (!memo) return sendJSON(req, res, 404, { error: "备忘不存在" });
+        if (typeof body.rev !== "number" || body.rev !== memo.rev)
+          return sendJSON(req, res, 409, { error: "备忘已被其他窗口修改，请刷新后重试", rev: memo.rev });
+        if (body.content !== undefined) memo.content = String(body.content);
+        if (body.tags !== undefined) memo.tags = Array.isArray(body.tags) ? body.tags : [];
+        if (body.visibility !== undefined) memo.visibility = body.visibility;
+        if (body.pinned !== undefined) memo.pinned = !!body.pinned;
+        if (body.archived !== undefined) memo.archived = !!body.archived;
+        memo.rev += 1;
+        memo.updatedAt = GBSchema.nowISO();
+        GBSchema.normalizeMemo(memo); // 字段规范化（visibility 白名单等）
+        backupContent();
+        writeContent(CONTENT_FILE, data);
+        rssCache = null;
+        sitemapCache = null;
+        GBEvent.emit("memo:update", memo);
+        auditLog("memo:update", req, memo.id);
+        return sendJSON(req, res, 200, memo);
+      }
+
+      /* 删除备忘 */
+      if (memoId && !isShare && req.method === "DELETE") {
+        if (!authRequired(req, res)) return;
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        const idx = (data.memos || []).findIndex((m) => m.id === memoId);
+        if (idx < 0) return sendJSON(req, res, 404, { error: "备忘不存在" });
+        backupContent();
+        data.memos.splice(idx, 1);
+        writeContent(CONTENT_FILE, data);
+        rssCache = null;
+        sitemapCache = null;
+        GBEvent.emit("memo:delete", { id: memoId });
+        auditLog("memo:delete", req, memoId);
+        return send(req, res, 204, "", "text/plain; charset=utf-8");
+      }
+
+      /* 生成分享链接：随机令牌 + 过期时间 */
+      if (memoId && isShare && req.method === "POST") {
+        if (!authRequired(req, res)) return;
+        const body = JSON.parse((await readBody(req, 1e5)).toString() || "{}");
+        const hours = Number(body.expireHours) > 0 ? Number(body.expireHours) : 24; // 默认 24 小时
+        const data = GBSchema.migrate(readJSON(CONTENT_FILE, {}));
+        const memo = (data.memos || []).find((m) => m.id === memoId);
+        if (!memo) return sendJSON(req, res, 404, { error: "备忘不存在" });
+        memo.share = {
+          enabled: true,
+          token: crypto.randomBytes(16).toString("hex"),
+          expireAt: new Date(Date.now() + hours * 36e5).toISOString(),
+        };
+        memo.updatedAt = GBSchema.nowISO();
+        backupContent();
+        writeContent(CONTENT_FILE, data);
+        rssCache = null;
+        sitemapCache = null;
+        GBEvent.emit("memo:update", memo);
+        auditLog("memo:update", req, memo.id);
+        return sendJSON(req, res, 200, { url: `/memos.html?share=${memo.share.token}&id=${memo.id}` });
+      }
+
+      return sendJSON(req, res, 405, { error: "方法不允许" });
+    }
 
     if (p === "/api/login" && req.method === "POST") {
       const ip = clientIP(req);
@@ -343,13 +567,18 @@ const server = http.createServer(async (req, res) => {
       const sessions = readJSON(SESSIONS_FILE, {});
       sessions[token] = { user, touched: Date.now() };
       writeJSON(SESSIONS_FILE, sessions, false);
+      auditLog("login", req, user);
       return sendJSON(req, res, 200, { token });
     }
 
     if (p === "/api/logout" && req.method === "POST") {
       const t = tokenOf(req);
       const sessions = readJSON(SESSIONS_FILE, {});
-      if (t && sessions[t]) { delete sessions[t]; writeJSON(SESSIONS_FILE, sessions, false); }
+      if (t && sessions[t]) {
+        auditLog("logout", req, sessions[t].user);
+        delete sessions[t];
+        writeJSON(SESSIONS_FILE, sessions, false);
+      }
       return sendJSON(req, res, 200, { ok: true });
     }
 
@@ -360,7 +589,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === "/api/content" && req.method === "PUT") {
-      if (!authOK(req)) return sendJSON(req, res, 401, { error: "未登录" });
+      if (!authRequired(req, res)) return;
       const data = JSON.parse((await readBody(req, 50 * 1024 * 1024)).toString());
       if (!data.profile || !Array.isArray(data.posts) || !Array.isArray(data.projects))
         return sendJSON(req, res, 400, { error: "内容结构不完整" });
@@ -377,16 +606,16 @@ const server = http.createServer(async (req, res) => {
 
       // 写入前自动备份旧版本（保留最近 20 份）
       backupContent();
-      const tmp = CONTENT_FILE + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-      fs.renameSync(tmp, CONTENT_FILE); // 原子写入
+      writeContent(CONTENT_FILE, data); // 原子写入
       rssCache = null;                  // 内容变更，RSS / Sitemap 缓存失效
       sitemapCache = null;
+      auditLog("content:update", req, `rev=${data.rev}`);
+      GBEvent.emit("post:update", { rev: data.rev });
       return sendJSON(req, res, 200, { ok: true, rev: data.rev });
     }
 
     if (p === "/api/upload" && req.method === "POST") {
-      if (!authOK(req)) return sendJSON(req, res, 401, { error: "未登录" });
+      if (!authRequired(req, res)) return;
       const conf = UPLOAD_DIRS[url.searchParams.get("dir")];
       if (!conf) return sendJSON(req, res, 400, { error: "dir 参数无效（images / packages）" });
       const rawName = String(url.searchParams.get("name") || "").toLowerCase();
@@ -413,6 +642,7 @@ const server = http.createServer(async (req, res) => {
         req.on("error", reject);
       });
       if (tooBig) { fs.unlink(abs, () => {}); return sendJSON(req, res, 413, { error: "文件超出大小限制" }); }
+      auditLog("upload", req, conf.dir + "/" + filename);
       return sendJSON(req, res, 200, { url: conf.dir + "/" + filename, size });
     }
 
@@ -435,7 +665,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === "/api/stats" && req.method === "GET") {
-      if (!authOK(req)) return sendJSON(req, res, 401, { error: "未登录" });
+      if (!authRequired(req, res)) return;
       const since = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
       const pages = {};
       let total = 0;
@@ -462,7 +692,7 @@ const server = http.createServer(async (req, res) => {
 
     /* 备份历史：列出 data/backups/ 下最近 20 份（字典序即时间序） */
     if (p === "/api/backups" && req.method === "GET") {
-      if (!authOK(req)) return sendJSON(req, res, 401, { error: "未登录" });
+      if (!authRequired(req, res)) return;
       let list = [];
       try {
         list = fs.readdirSync(BACKUP_DIR)
@@ -478,7 +708,7 @@ const server = http.createServer(async (req, res) => {
 
     /* 一键恢复：校验文件名防路径穿越 → 校验结构 → 当前内容再备份一份（可反悔）→ 原子写入 */
     if (p === "/api/restore" && req.method === "POST") {
-      if (!authOK(req)) return sendJSON(req, res, 401, { error: "未登录" });
+      if (!authRequired(req, res)) return;
       const { file } = JSON.parse((await readBody(req, 1e5)).toString() || "{}");
       if (!/^content-[\d-]+\.json$/.test(String(file || "")))
         return sendJSON(req, res, 400, { error: "备份文件名无效" });
@@ -495,11 +725,11 @@ const server = http.createServer(async (req, res) => {
       backupContent(); // 恢复前把当前内容也备份一份，恢复本身可反悔
       GBSchema.migrate(data); // 旧备份可能是老 schema，恢复即迁移到当前版本
       data.rev = current.rev + 1; // rev 只增不减，避免其他窗口持旧 rev 继续写入
-      const tmp = CONTENT_FILE + ".tmp";
-      fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-      fs.renameSync(tmp, CONTENT_FILE);
+      writeContent(CONTENT_FILE, data);
       rssCache = null;
       sitemapCache = null;
+      auditLog("restore", req, file);
+      GBEvent.emit("post:update", { rev: data.rev, restored: file });
       return sendJSON(req, res, 200, { ok: true, rev: data.rev });
     }
 

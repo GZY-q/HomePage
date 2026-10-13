@@ -1,6 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "rev": 4,
+  "memos": [],
+  "agentTasks": [],
   "profile": {
     "name": "Gede",
     "bio": "独立开发者 / 设计爱好者。喜欢简洁的工具、克制的界面与可长期维护的代码。这里记录我的写作与发布的软件作品。",
