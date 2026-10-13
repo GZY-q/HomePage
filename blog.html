@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" id="metaDesc" content="GlassBlog 个人博客" />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>博客 · GlassBlog</title>
+  <!-- 提前恢复主题，避免暗色模式白闪（FOUC）；与 common.js initTheme 逻辑保持一致 -->
+  <script>try{if(localStorage.getItem("gb_theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
+  <script src="assets/js/tailwind.min.js"></script>
+  <script src="assets/js/vendor/marked.min.js?v=20261013"></script>
+  <script src="assets/js/vendor/purify.min.js?v=20261013"></script>
+  <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
+  <link rel="alternate" type="application/rss+xml" title="GlassBlog RSS" href="rss.xml" />
+</head>
+<body class="min-h-screen antialiased">
+  <nav id="nav"></nav>
+  <!-- 阅读进度条（仅详情页显示） -->
+  <div id="readBar" class="fixed top-0 left-0 h-0.5 z-50 hidden transition-[width] duration-100"
+    style="background:var(--accent);width:0"></div>
+
+  <main class="max-w-3xl mx-auto px-5 pt-32 pb-20">
+    <!-- 列表视图 -->
+    <div id="listView">
+      <div class="flex items-center justify-between mb-6 px-1 fade-in">
+        <h1 class="text-2xl font-semibold">文章</h1>
+        <div class="flex gap-1.5" id="viewBtns">
+          <button class="chip on" data-v="list">列表</button>
+          <button class="chip" data-v="archive">归档</button>
+        </div>
+      </div>
+      <div id="listBody">
+        <input id="searchInput" placeholder="搜索标题 / 摘要 / 正文…（按 / 快速聚焦）"
+          class="glass-sm w-full px-4 py-2.5 text-sm bg-transparent outline-none mb-4" />
+        <div id="tagBar" class="flex flex-wrap gap-1.5 mb-6 px-1"></div>
+        <div id="postList" class="space-y-4"></div>
+        <div id="pager" class="mt-8 flex justify-center gap-2"></div>
+      </div>
+      <!-- 归档视图（按年月分组） -->
+      <div id="archiveView" class="hidden space-y-6"></div>
+    </div>
+
+    <!-- 详情视图（hash 路由：blog.html#文章id，或 ?p=文章id） -->
+    <div id="detailView" class="hidden">
+      <button onclick="location.href='blog.html'"
+        class="mb-5 text-sm text-accent">← 返回列表</button>
+      <article class="glass fade-in p-8 sm:p-10">
+        <h1 id="dTitle" class="text-2xl sm:text-3xl font-semibold tracking-tight"></h1>
+        <div class="mt-3 flex flex-wrap items-center gap-3 text-sm text-secondary">
+          <time id="dDate"></time>
+          <span id="dRead"></span>
+          <span id="dTags" class="flex gap-2"></span>
+          <button id="copyLinkBtn" class="ml-auto glass-sm px-3 py-1 text-xs transition-opacity hover:opacity-70">复制链接</button>
+        </div>
+        <img id="dCover" class="hidden mt-6 w-full rounded-2xl object-cover max-h-80" alt="" />
+        <div id="dBody" class="prose-glass mt-6"></div>
+      </article>
+      <!-- 上一篇 / 下一篇 -->
+      <div id="dPrevNext" class="mt-6 grid sm:grid-cols-2 gap-4"></div>
+      <!-- 相关文章 -->
+      <div id="dRelated" class="mt-10"></div>
+    </div>
+
+    <!-- 文章目录（大屏右侧悬浮，scroll-spy） -->
+    <aside id="dToc" class="hidden fixed top-32 w-56 glass p-4 text-sm max-h-[60vh] overflow-y-auto z-40"
+      style="left:calc(50% + 25rem)"></aside>
+
+    <footer class="text-center text-sm text-secondary pt-12">© 2026 GlassBlog</footer>
+  </main>
+
+  <script src="assets/js/schema.js?v=20261013"></script>
+  <script src="assets/js/common.js?v=20261013c"></script>
+  <script>
+    GB.renderNav("blog");
+    const PAGE_SIZE = 5;
+    let posts = [], page = 1, query = "", activeTag = "";
+
+    function filtered() {
+      const q = query.trim().toLowerCase();
+      return posts.filter((p) =>
+        (!activeTag || (p.tags || []).includes(activeTag)) &&
+        (!q || p.title.toLowerCase().includes(q) || (p.excerpt || "").toLowerCase().includes(q) ||
+          (p.content || "").toLowerCase().includes(q)));
+    }
+    function renderTagBar() {
+      const tags = [...new Set(posts.flatMap((p) => p.tags || []))];
+      tagBar.innerHTML = [`<button class="chip ${!activeTag ? "on" : ""}" data-t="">全部</button>`,
+        ...tags.map((t) => `<button class="chip ${activeTag === t ? "on" : ""}" data-t="${GB.esc(t)}">${GB.esc(t)}</button>`)
+      ].join("");
+    }
+    tagBar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-t]");
+      if (!b) return;
+      activeTag = b.dataset.t; page = 1;
+      renderTagBar(); renderList();
+    });
+    searchInput.addEventListener("input", () => { query = searchInput.value; page = 1; renderList(); });
+    // "/" 快捷键聚焦搜索框（输入框聚焦时 / 详情页不触发）
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "/" || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) return;
+      if (!detailView.classList.contains("hidden")) return;
+      e.preventDefault();
+      searchInput.focus();
+    });
+
+    /* ---------- 列表 / 归档视图切换 ---------- */
+    let view = "list";
+    viewBtns.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-v]");
+      if (!b) return;
+      view = b.dataset.v;
+      viewBtns.querySelectorAll(".chip").forEach((x) => x.classList.toggle("on", x === b));
+      listBody.classList.toggle("hidden", view !== "list");
+      archiveView.classList.toggle("hidden", view !== "archive");
+      if (view === "archive") renderArchive();
+    });
+    function renderArchive() {
+      const groups = {};
+      filtered().forEach((p) => {
+        const k = (p.date || "").slice(0, 7); // YYYY-MM
+        (groups[k] = groups[k] || []).push(p);
+      });
+      const keys = Object.keys(groups).sort().reverse();
+      archiveView.innerHTML = keys.length ? keys.map((k) => {
+        const [y, m] = k.split("-");
+        return `<div class="glass p-6 fade-in">
+          <div class="flex items-baseline gap-2 mb-3">
+            <h2 class="font-semibold">${y} 年 ${Number(m)} 月</h2>
+            <span class="text-xs text-secondary">${groups[k].length} 篇</span>
+          </div>
+          <ul class="space-y-2">
+            ${groups[k].map((p) => `<li class="flex items-baseline gap-3 text-sm">
+              <time class="text-xs text-secondary shrink-0">${GB.fmtDate(p.date)}</time>
+              <a href="blog.html#${p.slug || p.id}" class="transition-opacity hover:opacity-70 truncate">${GB.esc(p.title)}</a>
+            </li>`).join("")}
+          </ul>
+        </div>`;
+      }).join("") : `<div class="glass p-8 text-center text-sm text-secondary">暂无文章</div>`;
+    }
+
+    function renderList() {
+      const list = filtered();
+      const total = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      page = Math.min(page, total);
+      const slice = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+      postList.innerHTML = slice.length ? slice.map((p, i) =>
+        `<a href="blog.html#${p.slug || p.id}" class="glass glass-hover block p-6 fade-in" style="animation-delay:${i * 0.06}s">
+           ${p.cover ? `<img src="${GB.esc(p.cover)}" alt="" loading="lazy" class="mb-4 w-full h-40 object-cover rounded-xl" />` : ""}
+           <div class="flex items-baseline justify-between gap-4">
+             <h2 class="text-lg font-medium">${GB.esc(p.title)}</h2>
+             <time class="text-xs text-secondary shrink-0">${GB.fmtDate(p.date)}</time>
+           </div>
+           <p class="mt-2 text-sm text-secondary leading-relaxed line-clamp-2">${GB.esc(p.excerpt)}</p>
+           <div class="mt-3 flex flex-wrap items-center gap-2">
+             ${(p.tags || []).map((t) => `<span class="glass-sm px-2.5 py-0.5 text-xs text-secondary">${GB.esc(t)}</span>`).join("")}
+             <span class="text-xs text-secondary ml-auto">约 ${GB.readingTime(p.content)} 分钟读完</span>
+           </div>
+         </a>`
+      ).join("") :
+        `<div class="glass p-8 text-center text-sm text-secondary">没有找到相关文章</div>`;
+
+      // 分页按钮
+      pager.innerHTML = total <= 1 ? "" : Array.from({ length: total }, (_, i) =>
+        `<button onclick="goPage(${i + 1})"
+           class="glass-sm w-9 h-9 text-sm ${page === i + 1 ? "text-accent font-semibold" : "text-secondary"}">${i + 1}</button>`
+      ).join("");
+
+      GB.emit("blog:list", { list: slice, page, total }); // 模块挂钩点
+    }
+    window.goPage = (p) => { page = p; renderList(); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+    /* ---------- 详情页：目录 / 进度条 / 上下篇 / 相关文章 ---------- */
+    const tocWide = matchMedia("(min-width: 80rem)");
+    let tocObserver = null;
+
+    function renderDetail(id) {
+      // 路由键为 slug（永久链接）；旧格式 id 直链继续可用
+      const p = posts.find((x) => x.slug === id) || posts.find((x) => x.id === id);
+      if (!p) { location.href = "blog.html"; return; }
+      dTitle.textContent = p.title;
+      dDate.textContent = GB.fmtDate(p.date);
+      dRead.textContent = `约 ${GB.readingTime(p.content)} 分钟读完`;
+      dTags.innerHTML = (p.tags || []).map((t) =>
+        `<span class="glass-sm px-2.5 py-0.5 text-xs">${GB.esc(t)}</span>`).join("");
+      dCover.classList.toggle("hidden", !p.cover);
+      if (p.cover) dCover.src = p.cover;
+      dBody.innerHTML = GB.md(p.content || ""); // DOMPurify 消毒
+      dBody.querySelectorAll("img").forEach((img) => { img.loading = "lazy"; }); // 正文图片懒加载
+      GB.enhanceCode(dBody); // 代码高亮（懒加载 hljs）+ 复制按钮
+      // 复制文章直链（?p= 短链，与 sitemap 一致）
+      copyLinkBtn.onclick = async () => {
+        const url = location.href.split(/[?#]/)[0] + "?p=" + encodeURIComponent(p.slug || p.id);
+        try { await navigator.clipboard.writeText(url); copyLinkBtn.textContent = "已复制 ✓"; }
+        catch (e) { copyLinkBtn.textContent = "复制失败"; }
+        setTimeout(() => (copyLinkBtn.textContent = "复制链接"), 1200);
+      };
+      // SEO：动态标题与摘要
+      document.title = p.title + " · GlassBlog";
+      metaDesc.setAttribute("content", p.excerpt || p.title);
+      buildToc();
+      renderPrevNext(p);
+      renderRelated(p);
+      listView.classList.add("hidden");
+      detailView.classList.remove("hidden");
+      readBar.classList.remove("hidden");
+      updateReadBar();
+      window.scrollTo(0, 0);
+      GB.emit("blog:detail", { post: p, body: dBody }); // 模块挂钩点
+    }
+
+    // 目录（h2/h3，scroll-spy 高亮当前节）
+    function buildToc() {
+      tocObserver?.disconnect();
+      const heads = [...dBody.querySelectorAll("h2, h3")];
+      if (heads.length < 2 || !tocWide.matches) { dToc.classList.add("hidden"); return; }
+      heads.forEach((h, i) => h.id = "toc-" + i);
+      dToc.innerHTML = `<div class="text-xs text-secondary mb-2">目录</div>` + heads.map((h, i) =>
+        `<a href="#toc-${i}" data-i="${i}"
+           class="toc-item block py-1 truncate transition-opacity hover:opacity-70 ${h.tagName === "H3" ? "pl-3 text-xs" : ""}">${GB.esc(h.textContent)}</a>`
+      ).join("");
+      dToc.classList.remove("hidden");
+      dToc.querySelectorAll("a").forEach((a) => a.addEventListener("click", (e) => {
+        e.preventDefault(); // 不污染 hash 路由，仅平滑滚动
+        document.getElementById("toc-" + a.dataset.i)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }));
+      tocObserver = new IntersectionObserver((ents) => {
+        ents.forEach((en) => {
+          if (!en.isIntersecting) return;
+          dToc.querySelectorAll(".toc-item").forEach((a) =>
+            a.classList.toggle("toc-on", a.dataset.i === en.target.id.slice(4)));
+        });
+      }, { rootMargin: "0px 0px -70% 0px" });
+      heads.forEach((h) => tocObserver.observe(h));
+    }
+    tocWide.addEventListener("change", () => {
+      if (!detailView.classList.contains("hidden")) buildToc();
+    });
+
+    // 阅读进度条
+    function updateReadBar() {
+      if (detailView.classList.contains("hidden")) return;
+      const h = document.documentElement;
+      const max = h.scrollHeight - h.clientHeight;
+      readBar.style.width = (max > 0 ? Math.min(100, h.scrollTop / max * 100) : 0) + "%";
+    }
+    window.addEventListener("scroll", updateReadBar, { passive: true });
+
+    function renderPrevNext(p) {
+      const i = posts.findIndex((x) => x.id === p.id);
+      const newer = posts[i - 1], older = posts[i + 1]; // posts 按日期倒序
+      const card = (post, label, align) => post ?
+        `<a href="blog.html#${post.slug || post.id}" class="glass glass-hover p-4 block ${align}">
+           <div class="text-xs text-secondary mb-1">${label}</div>
+           <div class="text-sm font-medium truncate">${GB.esc(post.title)}</div>
+         </a>` : `<div class="hidden sm:block"></div>`;
+      dPrevNext.innerHTML = card(older, "← 上一篇") + card(newer, "下一篇 →", "sm:text-right");
+    }
+
+    function renderRelated(p) {
+      const rel = posts.filter((x) => x.id !== p.id)
+        .map((x) => ({ x, n: (x.tags || []).filter((t) => (p.tags || []).includes(t)).length }))
+        .filter((r) => r.n > 0)
+        .sort((a, b) => b.n - a.n)
+        .slice(0, 3);
+      dRelated.innerHTML = rel.length ? `
+        <h3 class="text-sm font-semibold mb-3 px-1 text-secondary">相关文章</h3>
+        <div class="grid sm:grid-cols-3 gap-4">
+          ${rel.map(({ x }) => `<a href="blog.html#${x.slug || x.id}" class="glass glass-hover p-4 block">
+            ${x.cover ? `<img src="${GB.esc(x.cover)}" alt="" loading="lazy" class="mb-3 w-full h-20 object-cover rounded-lg" />` : ""}
+            <div class="text-sm font-medium line-clamp-2">${GB.esc(x.title)}</div>
+            <div class="mt-1 text-xs text-secondary">${GB.fmtDate(x.date)}</div>
+          </a>`).join("")}
+        </div>` : "";
+    }
+
+    function route() {
+      // 支持 hash（SPA 内跳转）与 ?p=id（SEO 友好直链，sitemap 使用）
+      let hash = location.hash.slice(1);
+      try { hash = decodeURIComponent(hash); } catch (e) { hash = ""; } // 畸形编码（如 #%）不炸路由
+      const id = hash || new URLSearchParams(location.search).get("p");
+      if (id) renderDetail(id);
+      else {
+        detailView.classList.add("hidden");
+        listView.classList.remove("hidden");
+        readBar.classList.add("hidden");
+        dToc.classList.add("hidden");
+        tocObserver?.disconnect();
+        document.title = "博客 · GlassBlog";
+        metaDesc.setAttribute("content", "GlassBlog 个人博客");
+      }
+    }
+    window.addEventListener("hashchange", route);
+
+    (async () => {
+      const data = await GB.load();
+      GB.track(); // 隐私友好访问上报（仅后端模式生效）
+      posts = data.posts
+        .filter((p) => p.status === "published")
+        .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+      renderTagBar();
+      renderList();
+      route();
+    })();
+  </script>
+</body>
+</html>

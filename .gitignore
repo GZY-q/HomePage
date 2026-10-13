@@ -1,0 +1,11 @@
+# 后端运行时数据（不入库）
+data/sessions.json
+data/stats.json
+data/backups/
+uploads/*
+!uploads/.gitkeep
+downloads/*
+!downloads/.gitkeep
+node_modules/
+.DS_Store
+.trae-html-share-packages/

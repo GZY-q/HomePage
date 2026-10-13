@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>软件 · GlassBlog</title>
+  <meta name="description" content="GlassBlog 软件发布页：桌面应用免费下载与版本更新。" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="软件发布 · GlassBlog" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <!-- 提前恢复主题，避免暗色模式白闪（FOUC）；与 common.js initTheme 逻辑保持一致 -->
+  <script>try{if(localStorage.getItem("gb_theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
+  <script src="assets/js/tailwind.min.js"></script>
+  <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
+  <link rel="alternate" type="application/rss+xml" title="GlassBlog RSS" href="rss.xml" />
+</head>
+<body class="min-h-screen antialiased">
+  <nav id="nav"></nav>
+
+  <main class="max-w-4xl mx-auto px-5 pt-32 pb-20">
+    <h1 class="text-2xl font-semibold mb-2 px-1 fade-in">软件发布</h1>
+    <p class="text-secondary text-sm mb-8 px-1 fade-in">我开发并维护的桌面应用，免费下载。</p>
+    <div id="appList" class="space-y-6"></div>
+    <footer class="text-center text-sm text-secondary pt-12">© 2026 GlassBlog</footer>
+  </main>
+
+  <script src="assets/js/schema.js?v=20261013"></script>
+  <script src="assets/js/common.js?v=20261013c"></script>
+  <script>
+    GB.renderNav("apps");
+    (async () => {
+      const data = await GB.load();
+      GB.track(); // 隐私友好访问上报（仅后端模式生效）
+      appList.innerHTML = data.projects.length ? data.projects.map((p, i) =>
+        `<article id="${p.id}" class="glass fade-in overflow-hidden" style="animation-delay:${i * 0.08}s">
+           <!-- 预览截图：横向滚动 -->
+           ${p.screenshots?.length ? `
+           <div class="flex gap-3 overflow-x-auto p-5 pb-0">
+             ${p.screenshots.map((s) =>
+               `<img src="${GB.esc(s)}" alt="${GB.esc(p.name)} 截图" loading="lazy"
+                  class="h-44 sm:h-52 rounded-2xl ring-1 ring-[var(--glass-border)] object-cover shrink-0" />`).join("")}
+           </div>` : ""}
+
+           <div class="p-6 sm:p-7">
+             <div class="flex flex-wrap items-center gap-3">
+               <h2 class="text-xl font-semibold">${GB.esc(p.name)}</h2>
+               <span class="glass-sm px-2.5 py-0.5 text-xs text-accent font-medium">v${GB.esc(p.version)}</span>
+               <time class="text-xs text-secondary">${GB.fmtDate(p.date)}</time>
+             </div>
+             <p class="mt-2.5 text-sm text-secondary leading-relaxed">${GB.esc(p.desc)}</p>
+
+             <!-- 更新日志 -->
+             <details class="mt-4">
+               <summary class="text-sm text-accent cursor-pointer select-none">更新日志</summary>
+               <pre class="mt-2 text-sm text-secondary whitespace-pre-wrap font-sans leading-relaxed">${GB.esc(p.changelog)}</pre>
+             </details>
+
+             <!-- 多平台下载 -->
+             <div class="mt-5 flex flex-wrap gap-3">
+               ${(p.platforms || []).map((pl) =>
+                 `<a href="${GB.esc(pl.url)}" download
+                    class="glass-sm glass-hover px-5 py-2.5 text-sm flex items-center gap-2">
+                    <span class="text-accent">⤓</span>
+                    <span>${GB.esc(pl.os)}</span>
+                    ${pl.size ? `<span class="text-xs text-secondary">${GB.esc(pl.size)}</span>` : ""}
+                  </a>`).join("")}
+             </div>
+           </div>
+         </article>`
+      ).join("") : `<div class="glass p-8 text-center text-sm text-secondary">还没有发布软件</div>`;
+      GB.emit("apps:render", data.projects); // 模块挂钩点
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>页面不存在 · GlassBlog</title>
+  <!-- 提前恢复主题，避免暗色模式白闪（FOUC）；与 common.js initTheme 逻辑保持一致 -->
+  <script>try{if(localStorage.getItem("gb_theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
+  <script src="assets/js/tailwind.min.js"></script>
+  <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
+</head>
+<body class="min-h-screen antialiased">
+  <nav id="nav"></nav>
+  <main class="min-h-screen flex items-center justify-center px-5">
+    <section class="glass fade-in p-10 sm:p-14 text-center max-w-md">
+      <div class="text-6xl font-semibold text-accent tracking-tight">404</div>
+      <h1 class="mt-4 text-xl font-semibold">页面不存在</h1>
+      <p class="mt-2 text-sm text-secondary leading-relaxed">你访问的地址可能已被移动或删除。</p>
+      <div class="mt-8 flex justify-center gap-3">
+        <a href="index.html" class="glass-sm glass-hover px-5 py-2.5 text-sm text-accent">返回主页</a>
+        <a href="blog.html" class="glass-sm glass-hover px-5 py-2.5 text-sm text-secondary">去博客看看</a>
+      </div>
+    </section>
+  </main>
+  <script src="assets/js/common.js?v=20261013c"></script>
+  <script>GB.renderNav("");</script>
+</body>
+</html>

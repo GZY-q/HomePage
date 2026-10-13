@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>管理后台 · GlassBlog</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <!-- 提前恢复主题，避免暗色模式白闪（FOUC）；与 common.js initTheme 逻辑保持一致 -->
+  <script>try{if(localStorage.getItem("gb_theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
+  <script src="assets/js/tailwind.min.js"></script>
+  <script src="assets/js/vendor/marked.min.js?v=20261013"></script>
+  <script src="assets/js/vendor/purify.min.js?v=20261013"></script>
+  <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
+</head>
+<body class="min-h-screen antialiased">
+  <nav id="nav"></nav>
+
+  <!-- ========== 登录视图（演示账号：admin / glass123） ========== -->
+  <div id="loginView" class="hidden min-h-screen flex items-center justify-center px-5">
+    <form id="loginForm" class="glass fade-in w-full max-w-sm p-8">
+      <h1 class="text-xl font-semibold text-center">管理后台</h1>
+      <p class="mt-1 text-sm text-secondary text-center">默认账号 admin · 密码 glass123（可用环境变量覆盖）</p>
+      <input id="loginUser" placeholder="账号" autocomplete="username"
+        class="glass-sm mt-6 w-full px-4 py-2.5 text-sm bg-transparent outline-none" />
+      <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password"
+        class="glass-sm mt-3 w-full px-4 py-2.5 text-sm bg-transparent outline-none" />
+      <p id="loginErr" class="hidden mt-3 text-sm text-red-500">账号或密码错误</p>
+      <button class="glass-sm glass-hover mt-5 w-full py-2.5 text-sm font-medium text-accent">登 录</button>
+    </form>
+  </div>
+
+  <!-- ========== 后台主视图 ========== -->
+  <div id="adminView" class="hidden max-w-6xl mx-auto px-5 pt-28 pb-20">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-semibold">内容管理</h1>
+        <span id="modeBadge" class="glass-sm px-3 py-1 text-xs text-secondary"></span>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="exportJSON()" class="glass-sm glass-hover px-4 py-2 text-sm">导出 JSON</button>
+        <button onclick="importJSON()" class="glass-sm glass-hover px-4 py-2 text-sm">导入 JSON</button>
+        <button onclick="resetData()" class="glass-sm glass-hover px-4 py-2 text-sm text-red-500">恢复默认</button>
+        <button onclick="logout()" class="glass-sm glass-hover px-4 py-2 text-sm text-secondary">退出登录</button>
+      </div>
+    </div>
+
+    <!-- 标签页 -->
+    <div class="glass-sm inline-flex gap-1 p-1 rounded-full mb-6">
+      <button data-tab="posts" class="tabBtn px-5 py-1.5 rounded-full text-sm">文章</button>
+      <button data-tab="apps" class="tabBtn px-5 py-1.5 rounded-full text-sm">软件项目</button>
+      <button data-tab="profile" class="tabBtn px-5 py-1.5 rounded-full text-sm">个人信息</button>
+      <button data-tab="stats" class="tabBtn px-5 py-1.5 rounded-full text-sm">统计</button>
+    </div>
+
+    <!-- ===== 文章管理 ===== -->
+    <section id="tab-posts">
+      <div class="grid lg:grid-cols-5 gap-5">
+        <!-- 文章列表 -->
+        <div class="lg:col-span-2 space-y-3">
+          <button onclick="editPost(null)" class="glass glass-hover w-full py-3 text-sm text-accent font-medium">＋ 新建文章</button>
+          <input id="postSearch" placeholder="搜索标题…" oninput="renderPosts()"
+            class="glass-sm w-full px-4 py-2 text-sm bg-transparent outline-none" />
+          <div class="flex gap-1.5 flex-wrap" id="postFilters">
+            <button class="chip on" data-f="all">全部</button>
+            <button class="chip" data-f="published">已发布</button>
+            <button class="chip" data-f="draft">草稿</button>
+            <button class="chip" data-f="offline">已下架</button>
+          </div>
+          <div id="postItems" class="space-y-3"></div>
+        </div>
+        <!-- 编辑器（Memos 风格：工具栏 + 快捷键 + 粘贴/拖拽图片上传 + 自动草稿） -->
+        <div id="postEditor" class="lg:col-span-3 glass p-6 hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold" id="postEditorTitle">新建文章</h2>
+            <div class="flex items-center gap-3">
+              <span id="draftTip" class="text-xs text-secondary"></span>
+              <button onclick="closePostEditor()" class="text-sm text-secondary">收起 ✕</button>
+            </div>
+          </div>
+          <input id="pTitle" placeholder="文章标题" class="glass-sm w-full px-4 py-2.5 text-sm bg-transparent outline-none" />
+          <!-- 永久链接 slug：发布后会成为 ?p=<slug> 地址，建议英文且保持稳定 -->
+          <div class="mt-3 flex items-center gap-2">
+            <span class="text-xs text-secondary shrink-0 pl-1">链接</span>
+            <input id="pSlug" placeholder="slug（留空自动从英文标题生成，如 my-first-post）"
+              class="glass-sm flex-1 px-4 py-2 text-sm bg-transparent outline-none" />
+          </div>
+          <div class="grid grid-cols-2 gap-3 mt-3">
+            <input id="pTags" placeholder="标签（逗号分隔）" class="glass-sm px-4 py-2.5 text-sm bg-transparent outline-none" />
+            <select id="pStatus" class="glass-sm px-4 py-2.5 text-sm bg-transparent outline-none">
+              <option value="draft">草稿</option>
+              <option value="published">发布</option>
+              <option value="offline">下架</option>
+            </select>
+          </div>
+          <!-- 已有标签快选 -->
+          <div id="pTagPick" class="mt-2 flex flex-wrap gap-1.5"></div>
+          <!-- 封面图（可选） -->
+          <div class="mt-3 flex gap-2 items-center">
+            <input id="pCover" placeholder="封面图 URL（可选）" class="glass-sm flex-1 px-4 py-2 text-sm bg-transparent outline-none" />
+            <label class="glass-sm px-3 py-2 text-xs cursor-pointer whitespace-nowrap">上传封面
+              <input type="file" accept="image/*" class="hidden" onchange="uploadCover(this)" /></label>
+          </div>
+          <img id="pCoverPrev" class="hidden mt-2 h-24 rounded-xl object-cover ring-1 ring-[var(--glass-border)]" />
+          <textarea id="pExcerpt" rows="2" placeholder="摘要（留空则保存时自动生成）"
+            class="glass-sm mt-3 w-full px-4 py-2.5 text-sm bg-transparent outline-none resize-y"></textarea>
+          <!-- Markdown 工具栏 + 编辑区 -->
+          <div id="mdSplit" class="mt-3 grid gap-3 md:grid-cols-2">
+            <div id="mdLeft">
+              <div class="md-toolbar" id="mdToolbar">
+                <button data-act="bold" title="加粗 ⌘B"><b>B</b></button>
+                <button data-act="italic" title="斜体 ⌘I"><i>I</i></button>
+                <button data-act="strike" title="删除线"><s>S</s></button>
+                <span class="md-sep"></span>
+                <button data-act="h2" title="标题">H</button>
+                <button data-act="quote" title="引用">❝</button>
+                <button data-act="ul" title="无序列表">• 列</button>
+                <button data-act="ol" title="有序列表">1. 列</button>
+                <button data-act="task" title="任务列表">☑</button>
+                <span class="md-sep"></span>
+                <button data-act="code" title="行内代码">&lt;/&gt;</button>
+                <button data-act="codeblock" title="代码块">{ }</button>
+                <button data-act="table" title="表格">⊞</button>
+                <span class="md-sep"></span>
+                <button data-act="link" title="链接 ⌘K">链接</button>
+                <button data-act="image" title="插入图片">图片</button>
+              </div>
+              <div class="md-editor-area">
+                <textarea id="pContent" rows="14" placeholder="Markdown 内容…&#10;支持直接粘贴 / 拖拽图片上传插入"></textarea>
+              </div>
+            </div>
+            <div id="pPreview" class="glass-sm px-4 py-3 text-sm prose-glass overflow-y-auto max-h-[30rem]"></div>
+          </div>
+          <div class="flex items-center justify-between mt-2">
+            <div class="flex gap-1.5" id="mdViewBtns">
+              <button class="chip md-view-btn" data-v="edit">编辑</button>
+              <button class="chip md-view-btn on" data-v="split">分屏</button>
+              <button class="chip md-view-btn" data-v="preview">预览</button>
+            </div>
+            <span id="pWordCount" class="text-xs text-secondary"></span>
+          </div>
+          <input type="file" id="mdImageInput" accept="image/*" multiple class="hidden" />
+          <button onclick="savePost()" class="glass-sm glass-hover mt-4 px-6 py-2.5 text-sm font-medium text-accent">保存（⌘S）</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 软件项目管理 ===== -->
+    <section id="tab-apps" class="hidden">
+      <div class="grid lg:grid-cols-5 gap-5">
+        <div class="lg:col-span-2 space-y-3">
+          <button onclick="editApp(null)" class="glass glass-hover w-full py-3 text-sm text-accent font-medium">＋ 新增软件项目</button>
+          <div id="appItems" class="space-y-3"></div>
+        </div>
+        <div id="appEditor" class="lg:col-span-3 glass p-6 hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="font-semibold" id="appEditorTitle">新增软件</h2>
+            <button onclick="closeAppEditor()" class="text-sm text-secondary">收起 ✕</button>
+          </div>
+          <div class="grid sm:grid-cols-2 gap-3">
+            <input id="aName" placeholder="软件名称" class="glass-sm px-4 py-2.5 text-sm bg-transparent outline-none" />
+            <input id="aVersion" placeholder="版本号，如 1.0.0" class="glass-sm px-4 py-2.5 text-sm bg-transparent outline-none" />
+          </div>
+          <textarea id="aDesc" rows="2" placeholder="软件简介"
+            class="glass-sm mt-3 w-full px-4 py-2.5 text-sm bg-transparent outline-none resize-y"></textarea>
+          <textarea id="aChangelog" rows="3" placeholder="更新日志（每行一条）"
+            class="glass-sm mt-3 w-full px-4 py-2.5 text-sm bg-transparent outline-none resize-y"></textarea>
+
+          <!-- 预览截图：可贴 URL 或上传图片（dataURL 演示） -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-medium">预览截图</h3>
+              <div class="flex gap-2">
+                <button onclick="addShot()" class="glass-sm px-3 py-1 text-xs">＋ 图片 URL</button>
+                <label class="glass-sm px-3 py-1 text-xs cursor-pointer">上传图片
+                  <input type="file" accept="image/*" class="hidden" onchange="uploadShot(this)" /></label>
+              </div>
+            </div>
+            <div id="aShots" class="mt-2 flex flex-wrap gap-2"></div>
+          </div>
+
+          <!-- 下载平台与安装包 -->
+          <div class="mt-4">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-medium">下载平台</h3>
+              <button onclick="addPlatform()" class="glass-sm px-3 py-1 text-xs">＋ 平台</button>
+            </div>
+            <div id="aPlatforms" class="mt-2 space-y-2"></div>
+            <p class="mt-2 text-xs text-secondary">后端模式下安装包真实上传到服务器 downloads/ 目录并持久保存；纯静态模式则生成临时 blob 链接，仅当前会话有效。</p>
+          </div>
+
+          <button onclick="saveApp()" class="glass-sm glass-hover mt-5 px-6 py-2.5 text-sm font-medium text-accent">保存</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 个人信息管理 ===== -->
+    <section id="tab-profile" class="hidden">
+      <div class="glass p-6 max-w-2xl">
+        <div class="flex items-center gap-5">
+          <img id="pfAvatarImg" class="w-20 h-20 rounded-full object-cover ring-1 ring-[var(--glass-border)]" />
+          <label class="glass-sm px-4 py-2 text-sm cursor-pointer">更换头像
+            <input type="file" accept="image/*" class="hidden" onchange="uploadAvatar(this)" /></label>
+        </div>
+        <input id="pfName" placeholder="名称" class="glass-sm mt-5 w-full px-4 py-2.5 text-sm bg-transparent outline-none" />
+        <textarea id="pfBio" rows="3" placeholder="个人简介"
+          class="glass-sm mt-3 w-full px-4 py-2.5 text-sm bg-transparent outline-none resize-y"></textarea>
+        <div class="mt-4 flex items-center justify-between">
+          <h3 class="text-sm font-medium">社交链接</h3>
+          <button onclick="addSocial()" class="glass-sm px-3 py-1 text-xs">＋ 链接</button>
+        </div>
+        <div id="pfSocials" class="mt-2 space-y-2"></div>
+        <button onclick="saveProfile()" class="glass-sm glass-hover mt-5 px-6 py-2.5 text-sm font-medium text-accent">保存</button>
+      </div>
+
+      <!-- 数据备份：整站内容导出 / 导入 / 恢复默认 -->
+      <div class="glass p-6 max-w-2xl mt-6">
+        <h2 class="text-lg font-semibold">数据备份</h2>
+        <p class="mt-1 text-xs text-secondary">内容为单文件 JSON，可整体导出备份或从备份恢复。导入将覆盖当前全部内容。</p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button onclick="exportJSON()" class="glass-sm glass-hover px-4 py-2 text-sm">导出备份</button>
+          <button onclick="importJSON()" class="glass-sm glass-hover px-4 py-2 text-sm">导入备份</button>
+          <button onclick="resetData()" class="glass-sm glass-hover px-4 py-2 text-sm text-red-500">恢复默认内容</button>
+        </div>
+        <!-- 服务端自动备份历史（仅后端模式）：每次保存前自动备份，可一键恢复 -->
+        <div id="backupBox" class="hidden mt-5 pt-5" style="border-top:1px solid var(--glass-border)">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-medium">自动备份历史</h3>
+            <span class="text-xs text-secondary">保留最近 20 份</span>
+          </div>
+          <div id="backupList" class="mt-3 space-y-2"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 访问统计（隐私友好：仅路径计数，无 Cookie，近 30 天） ===== -->
+    <section id="tab-stats" class="hidden">
+      <div class="glass p-6 max-w-2xl">
+        <div class="flex items-baseline justify-between">
+          <h2 class="text-lg font-semibold">访问统计</h2>
+          <span class="text-xs text-secondary">近 30 天 · 同 IP 同页 30 分钟去重</span>
+        </div>
+        <div class="mt-5 grid grid-cols-3 gap-4">
+          <div>
+            <div id="stToday" class="text-2xl font-semibold">–</div>
+            <div class="mt-0.5 text-xs text-secondary">今日</div>
+          </div>
+          <div>
+            <div id="stWeek" class="text-2xl font-semibold">–</div>
+            <div class="mt-0.5 text-xs text-secondary">近 7 天</div>
+          </div>
+          <div>
+            <div id="stTotal" class="text-2xl font-semibold text-accent">–</div>
+            <div class="mt-0.5 text-xs text-secondary">近 30 天</div>
+          </div>
+        </div>
+        <div id="stChart" class="mt-5"></div>
+        <div id="stPages" class="mt-6 space-y-3"></div>
+        <p id="stEmpty" class="hidden mt-6 text-sm text-secondary">暂无统计数据，前台页面被访问后自动上报。</p>
+        <p id="stTip" class="hidden mt-6 text-sm text-secondary">静态演示模式无统计功能，请使用 <code>node server.js</code> 启动后端。</p>
+      </div>
+    </section>
+  </div>
+
+  <script src="assets/js/schema.js?v=20261013"></script>
+  <script src="assets/js/common.js?v=20261013c"></script>
+  <script>
+    /* ================= 登录（后端模式走 /api/login 令牌认证；无后端时回退静态演示校验） ================= */
+    const AUTH_KEY = "gb_auth";
+    GB.renderNav("admin");
+
+    function checkAuth() {
+      const ok = localStorage.getItem(AUTH_KEY) === "1";
+      loginView.classList.toggle("hidden", ok);
+      adminView.classList.toggle("hidden", !ok);
+      if (ok) init();
+    }
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      loginErr.classList.add("hidden");
+      const ok = await GB.login(loginUser.value.trim(), loginPass.value);
+      if (ok) {
+        localStorage.setItem(AUTH_KEY, "1");
+        checkAuth();
+      } else loginErr.classList.remove("hidden");
+    };
+    window.logout = async () => { await GB.logout(); localStorage.removeItem(AUTH_KEY); location.reload(); };
+
+    /* ================= 数据 ================= */
+    let DB = null;          // 全部内容（内存态）
+    let curPost = null;     // 正在编辑的文章 id
+    let curApp = null;      // 正在编辑的软件 id
+    const persist = async () => {
+      try {
+        await GB.save(DB);   // 后端模式：写入服务端 content.json → 多端同步
+        toastSaved();
+        renderBackups();     // 每次保存服务端都会生成新备份，刷新历史列表
+      } catch (e) {
+        if (e.code === 409) { // rev 乐观锁冲突：另一窗口/设备已先保存
+          if (confirm("内容已在其他窗口被修改。\n点「确定」刷新载入最新内容（当前未保存的修改将丢失）。"))
+            location.reload();
+          return;
+        }
+        alert("保存失败：" + e.message);
+        if (/未登录/.test(e.message)) logout(); // 令牌失效，回到登录页
+      }
+    };
+    function toastSaved() {
+      const t = document.createElement("div");
+      t.textContent = "已保存 ✓";
+      t.className = "glass fixed bottom-6 left-1/2 -translate-x-1/2 px-5 py-2.5 text-sm z-50 fade-in";
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1400);
+    }
+
+    /* ================= 标签页 ================= */
+    document.querySelectorAll(".tabBtn").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
+    function switchTab(tab) {
+      ["posts", "apps", "profile", "stats"].forEach((k) =>
+        document.getElementById("tab-" + k).classList.toggle("hidden", k !== tab));
+      document.querySelectorAll(".tabBtn").forEach((b) =>
+        b.classList.toggle("text-accent", b.dataset.tab === tab));
+      if (tab === "stats") loadStats();
+    }
+
+    /* ================= 访问统计 ================= */
+    async function loadStats() {
+      stTotal.textContent = "–";
+      stPages.innerHTML = "";
+      stEmpty.classList.add("hidden");
+      stTip.classList.add("hidden");
+      if (!GB.isApi()) { stTip.classList.remove("hidden"); return; }
+      let s;
+      try { s = await GB.stats(); }
+      catch (e) {
+        alert("获取统计失败：" + e.message);
+        if (/未登录/.test(e.message)) logout();
+        return;
+      }
+      const days = s.days || [];
+      stTotal.textContent = s.total;
+      stToday.textContent = days.length ? days[days.length - 1].count : 0;
+      stWeek.textContent = days.slice(-7).reduce((a, d) => a + d.count, 0);
+      renderChart(days);
+      if (!s.pages.length) { stEmpty.classList.remove("hidden"); return; }
+      const max = s.pages[0].count || 1;
+      stPages.innerHTML = s.pages.map((p) =>
+        `<div>
+           <div class="flex justify-between text-sm">
+             <span class="truncate">${GB.esc(p.path)}</span>
+             <span class="text-secondary ml-3 shrink-0">${p.count} 次</span>
+           </div>
+           <div class="mt-1 h-2 rounded-full bg-[var(--glass-bg)] overflow-hidden">
+             <div class="h-full rounded-full" style="width:${Math.max(3, Math.round(p.count / max * 100))}%;background:var(--accent);opacity:.75"></div>
+           </div>
+         </div>`).join("");
+    }
+
+    /* 近 30 天访问趋势（纯 SVG 面积图，无依赖；圆点悬浮显示单日数据） */
+    function renderChart(days) {
+      if (!days.length) { stChart.innerHTML = ""; return; }
+      const W = 620, H = 150, PL = 6, PR = 6, PT = 18, PB = 22;
+      const max = Math.max(1, ...days.map((d) => d.count));
+      const X = (i) => PL + (i / (days.length - 1)) * (W - PL - PR);
+      const Y = (v) => PT + (1 - v / max) * (H - PT - PB);
+      const line = days.map((d, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(d.count).toFixed(1)}`).join(" ");
+      const area = line + ` L${X(days.length - 1).toFixed(1)},${H - PB} L${X(0).toFixed(1)},${H - PB} Z`;
+      const fmt = (s) => s.slice(5).replace("-", "/"); // 2026-10-13 -> 10/13
+      const dots = days.map((d, i) =>
+        `<circle cx="${X(i).toFixed(1)}" cy="${Y(d.count).toFixed(1)}" r="7" fill="transparent"><title>${fmt(d.date)} · ${d.count} 次访问</title></circle>` +
+        (d.count === max && d.count > 0
+          ? `<circle cx="${X(i).toFixed(1)}" cy="${Y(d.count).toFixed(1)}" r="3" fill="var(--accent)"><title>${fmt(d.date)} · ${d.count} 次访问</title></circle>`
+          : "")).join("");
+      stChart.innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" class="w-full" style="height:auto" role="img" aria-label="近 30 天访问趋势">
+          <defs>
+            <linearGradient id="stGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" style="stop-color:var(--accent)" stop-opacity=".28"/>
+              <stop offset="1" style="stop-color:var(--accent)" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <line x1="${PL}" y1="${H - PB}" x2="${W - PR}" y2="${H - PB}" stroke="var(--glass-border)" stroke-width="1"/>
+          <path d="${area}" fill="url(#stGrad)"/>
+          <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+          ${dots}
+          <text x="${PL}" y="${H - 6}" font-size="10" fill="var(--text-2)">${fmt(days[0].date)}</text>
+          <text x="${W - PR}" y="${H - 6}" font-size="10" text-anchor="end" fill="var(--text-2)">${fmt(days[days.length - 1].date)}</text>
+          <text x="${PL}" y="${PT - 6}" font-size="10" fill="var(--text-2)">峰值 ${max}</text>
+        </svg>`;
+    }
+
+    /* ================= 文章管理（Memos 风格编辑器） ================= */
+    const STATUS_LABEL = { draft: "草稿", published: "已发布", offline: "已下架" };
+    let postFilter = "all";
+
+    /* ---------- 列表：搜索 + 状态筛选 ---------- */
+    function renderPosts() {
+      const q = (postSearch.value || "").trim().toLowerCase();
+      const list = DB.posts.filter((p) =>
+        (postFilter === "all" || p.status === postFilter) &&
+        (!q || p.title.toLowerCase().includes(q)));
+      postItems.innerHTML = list.length ? list.map((p) =>
+        `<div class="glass p-4">
+           <div class="flex items-center gap-2">
+             <span class="text-sm font-medium flex-1 truncate">${GB.esc(p.title)}</span>
+             <span class="glass-sm px-2 py-0.5 text-xs ${p.status === "published" ? "text-accent" : "text-secondary"}">${STATUS_LABEL[p.status]}</span>
+           </div>
+           <div class="mt-1 text-xs text-secondary">${GB.fmtDate(p.date)} · ${(p.tags || []).map(GB.esc).join(" / ") || "无标签"} · 约 ${GB.readingTime(p.content)} 分钟</div>
+           <div class="mt-3 flex gap-2 text-xs">
+             <button onclick="editPost('${p.id}')" class="glass-sm px-3 py-1">编辑</button>
+             <button onclick="cycleStatus('${p.id}')" class="glass-sm px-3 py-1">${p.status === "published" ? "下架" : "发布"}</button>
+             <button onclick="delPost('${p.id}')" class="glass-sm px-3 py-1 text-red-500">删除</button>
+           </div>
+         </div>`).join("") :
+        `<div class="glass p-6 text-center text-sm text-secondary">没有匹配的文章</div>`;
+    }
+    postFilters.querySelectorAll(".chip").forEach((c) =>
+      c.addEventListener("click", () => {
+        postFilters.querySelectorAll(".chip").forEach((x) => x.classList.remove("on"));
+        c.classList.add("on");
+        postFilter = c.dataset.f;
+        renderPosts();
+      }));
+
+    /* ---------- Markdown 编辑辅助（选区包裹 / 行首插入） ---------- */
+    function mdWrap(before, after = "", placeholder = "") {
+      const el = pContent;
+      const { selectionStart: s, selectionEnd: e, value: v } = el;
+      const sel = v.slice(s, e) || placeholder;
+      el.value = v.slice(0, s) + before + sel + after + v.slice(e);
+      el.selectionStart = s + before.length;
+      el.selectionEnd = s + before.length + sel.length;
+      el.focus(); onContentInput();
+    }
+    function mdLine(prefix) {
+      const el = pContent;
+      const { selectionStart: s, value: v } = el;
+      const lineStart = v.lastIndexOf("\n", s - 1) + 1;
+      el.value = v.slice(0, lineStart) + prefix + v.slice(lineStart);
+      el.selectionStart = el.selectionEnd = s + prefix.length;
+      el.focus(); onContentInput();
+    }
+    const MD_ACTIONS = {
+      bold: () => mdWrap("**", "**", "加粗文字"),
+      italic: () => mdWrap("*", "*", "斜体文字"),
+      strike: () => mdWrap("~~", "~~", "删除线"),
+      h2: () => mdLine("## "),
+      quote: () => mdLine("> "),
+      ul: () => mdLine("- "),
+      ol: () => mdLine("1. "),
+      task: () => mdLine("- [ ] "),
+      code: () => mdWrap("`", "`", "代码"),
+      codeblock: () => mdWrap("\n```js\n", "\n```\n", "code"),
+      table: () => mdWrap("\n| 列1 | 列2 |\n| --- | --- |\n|  |  |\n", ""),
+      link: () => mdWrap("[", "](https://)", "链接文字"),
+      image: () => mdImageInput.click(),
+    };
+    mdToolbar.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (b) { e.preventDefault(); MD_ACTIONS[b.dataset.act]?.(); }
+    });
+
+    /* ---------- 快捷键：⌘B/⌘I/⌘K/⌘S、Tab 缩进 ---------- */
+    pContent.addEventListener("keydown", (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.shiftKey) {
+        const k = e.key.toLowerCase();
+        if (k === "b") { e.preventDefault(); MD_ACTIONS.bold(); }
+        else if (k === "i") { e.preventDefault(); MD_ACTIONS.italic(); }
+        else if (k === "k") { e.preventDefault(); MD_ACTIONS.link(); }
+        else if (k === "s") { e.preventDefault(); savePost(); }
+      } else if (e.key === "Tab") {
+        e.preventDefault(); mdWrap("  ", "");
+      }
+    });
+
+    /* ---------- 图片：选择 / 粘贴 / 拖拽上传并插入 ---------- */
+    async function insertImages(files) {
+      for (const f of files) {
+        if (!f.type.startsWith("image/")) continue;
+        const ph = `![上传中 ${f.name}…]()`;
+        mdWrap(ph, "");
+        try {
+          const { url } = await GB.upload(f, "images"); // 后端模式：真实上传到 uploads/
+          // 用函数式替换，避免文件名含 $& 等序列被当作替换模式
+          pContent.value = pContent.value.replace(ph, () => `![${f.name}](${url})`);
+        } catch (e) {
+          pContent.value = pContent.value.replace(ph, "");
+          alert("图片上传失败：" + e.message);
+        }
+        onContentInput();
+      }
+    }
+    mdImageInput.addEventListener("change", () => { insertImages(mdImageInput.files); mdImageInput.value = ""; });
+    pContent.addEventListener("paste", (e) => {
+      const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+      if (files.length) { e.preventDefault(); insertImages(files); }
+    });
+    pContent.addEventListener("dragover", (e) => e.preventDefault());
+    pContent.addEventListener("drop", (e) => {
+      const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+      if (files.length) { e.preventDefault(); insertImages(files); }
+    });
+
+    /* ---------- 视图切换：编辑 / 分屏 / 预览 ---------- */
+    function setMdView(v) {
+      mdViewBtns.querySelectorAll(".md-view-btn").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+      const showEdit = v !== "preview", showPrev = v !== "edit";
+      mdLeft.classList.toggle("hidden", !showEdit);
+      pPreview.classList.toggle("hidden", !showPrev);
+      mdSplit.classList.toggle("md:grid-cols-2", showEdit && showPrev);
+    }
+    mdViewBtns.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-v]");
+      if (b) setMdView(b.dataset.v);
+    });
+
+    /* ---------- 预览 + 字数统计 ---------- */
+    function onContentInput() { renderPreview(); updateWordCount(); onDraftInput(); }
+    function renderPreview() {
+      pPreview.innerHTML = GB.md(pContent.value || "*实时预览*"); // DOMPurify 消毒
+      GB.enhanceCode(pPreview); // 代码高亮（懒加载 hljs）+ 复制按钮
+    }
+    function updateWordCount() {
+      const t = pContent.value || "";
+      const chars = t.replace(/\s/g, "").length;
+      pWordCount.textContent = t ? `${chars} 字 · 约 ${GB.readingTime(t)} 分钟读完` : "";
+    }
+
+    /* ---------- slug 联动：标题输入时自动派生，手动改过则不再覆盖 ---------- */
+    pTitle.addEventListener("input", () => {
+      if (pSlug.dataset.manual !== "1") pSlug.value = GBSchema.deriveSlug(pTitle.value);
+    });
+    pSlug.addEventListener("input", () => {
+      if (pSlug.value.trim()) pSlug.dataset.manual = "1"; // 用户手动接管
+      else delete pSlug.dataset.manual;                   // 清空恢复自动派生
+    });
+
+    /* ---------- 自动草稿（localStorage，防抖 500ms） ---------- */
+    const DRAFT_KEY = () => "gb_draft_" + (curPost || "new");
+    let draftTimer;
+    function onDraftInput() {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(saveDraft, 500);
+    }
+    function saveDraft() {
+      if (postEditor.classList.contains("hidden")) return;
+      localStorage.setItem(DRAFT_KEY(), JSON.stringify({
+        title: pTitle.value, slug: pSlug.value, tags: pTags.value, status: pStatus.value,
+        content: pContent.value, cover: pCover.value, excerpt: pExcerpt.value, t: Date.now(),
+      }));
+      draftTip.textContent = "草稿 " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) + " 已自动保存";
+    }
+    [pTitle, pSlug, pTags, pStatus, pCover, pExcerpt].forEach((el) => {
+      el.addEventListener("input", onDraftInput);
+      el.addEventListener("change", onDraftInput);
+    });
+    pContent.addEventListener("input", onContentInput);
+
+    /* ---------- 分屏滚动同步（仅分屏视图：编辑器 → 预览，按比例） ---------- */
+    pContent.addEventListener("scroll", () => {
+      if (pPreview.classList.contains("hidden") || mdLeft.classList.contains("hidden")) return;
+      const max = pContent.scrollHeight - pContent.clientHeight;
+      if (max <= 0) return;
+      pPreview.scrollTop = (pContent.scrollTop / max) * (pPreview.scrollHeight - pPreview.clientHeight);
+    }, { passive: true });
+
+    /* ---------- 标签快选 ---------- */
+    function renderTagPick() {
+      const all = [...new Set(DB.posts.flatMap((p) => p.tags || []))];
+      const cur = pTags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      pTagPick.innerHTML = all.filter((t) => !cur.includes(t)).slice(0, 12)
+        .map((t) => `<button type="button" class="chip" data-tag="${GB.esc(t)}">${GB.esc(t)}</button>`).join("");
+    }
+    pTagPick.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-tag]");
+      if (!b) return;
+      const cur = pTags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+      cur.push(b.dataset.tag);
+      pTags.value = cur.join(", ");
+      renderTagPick(); onDraftInput();
+    });
+    pTags.addEventListener("input", renderTagPick);
+
+    /* ---------- 封面图 ---------- */
+    window.uploadCover = async (input) => {
+      const f = input.files[0]; if (!f) return;
+      try {
+        const { url } = await GB.upload(f, "images");
+        pCover.value = url;
+        renderCoverPrev(); onDraftInput();
+      } catch (e) { alert("上传失败：" + e.message); }
+      input.value = "";
+    };
+    function renderCoverPrev() {
+      const u = pCover.value.trim();
+      pCoverPrev.classList.toggle("hidden", !u);
+      if (u) pCoverPrev.src = u;
+    }
+    pCover.addEventListener("input", renderCoverPrev);
+
+    /* ---------- 打开 / 保存 / 删除 ---------- */
+    window.editPost = (id) => {
+      curPost = id;
+      const p = id ? DB.posts.find((x) => x.id === id) : null;
+      postEditorTitle.textContent = p ? "编辑文章" : "新建文章";
+      pTitle.value = p?.title || "";
+      pSlug.value = p?.slug || "";
+      // 已有文章的 slug 即永久链接，锁定为手动态，避免改标题时被自动覆盖
+      if (p?.slug) pSlug.dataset.manual = "1"; else delete pSlug.dataset.manual;
+      pTags.value = p ? (p.tags || []).join(", ") : "";
+      pStatus.value = p?.status || "draft";
+      pCover.value = p?.cover || "";
+      pExcerpt.value = p?.excerpt || "";
+      pContent.value = p?.content || "";
+      // 自动草稿恢复
+      const d = localStorage.getItem(DRAFT_KEY());
+      if (d) {
+        try {
+          const draft = JSON.parse(d);
+          if (draft.title || draft.content) {
+            if (confirm("检测到有未保存的自动草稿，是否恢复？")) {
+              pTitle.value = draft.title || ""; pSlug.value = draft.slug || ""; pTags.value = draft.tags || "";
+              if (draft.slug) pSlug.dataset.manual = "1"; // 草稿里已确认的 slug 不再被标题覆盖
+              pStatus.value = draft.status || "draft";
+              pCover.value = draft.cover || ""; pExcerpt.value = draft.excerpt || ""; pContent.value = draft.content || "";
+            } else localStorage.removeItem(DRAFT_KEY());
+          }
+        } catch (e) { localStorage.removeItem(DRAFT_KEY()); }
+      }
+      draftTip.textContent = "";
+      renderTagPick(); renderCoverPrev(); onContentInput(); setMdView("split");
+      postEditor.classList.remove("hidden");
+      postEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.closePostEditor = () => postEditor.classList.add("hidden");
+    window.savePost = () => {
+      if (!pTitle.value.trim()) return alert("请填写标题");
+      const cur = curPost ? DB.posts.find((x) => x.id === curPost) : null;
+      // slug：手动输入 > 标题派生 > 沿用旧值 > 时间戳兜底（纯中文标题派生为空）
+      let slug = GBSchema.deriveSlug(pSlug.value) || GBSchema.deriveSlug(pTitle.value) ||
+        (cur && cur.slug) || "post-" + Date.now().toString(36);
+      const clash = DB.posts.find((x) => x.slug === slug && x !== cur);
+      if (clash) return alert(`链接 slug「${slug}」已被文章《${clash.title}》占用，请更换`);
+      const base = {
+        title: pTitle.value.trim(),
+        slug,
+        tags: pTags.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+        status: pStatus.value,
+        content: pContent.value,
+        cover: pCover.value.trim(),
+        excerpt: pExcerpt.value.trim() ||
+          pContent.value.replace(/[#>*`\-\[\]()!|]/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
+        updatedAt: GBSchema.nowISO(), // 本地时区（修正 UTC 偏差）
+      };
+      if (cur) Object.assign(cur, base);
+      else DB.posts.unshift({
+        id: "post-" + Date.now().toString(36),
+        date: GBSchema.localDateStr(),     // 展示日期：本地时区
+        createdAt: GBSchema.nowISO(),      // 创建时刻：排序 / RSS 用
+        ...base,
+      });
+      localStorage.removeItem(DRAFT_KEY());
+      persist(); renderPosts(); closePostEditor();
+    };
+    window.cycleStatus = (id) => {
+      const p = DB.posts.find((x) => x.id === id);
+      p.status = p.status === "published" ? "offline" : "published";
+      persist(); renderPosts();
+    };
+    window.delPost = (id) => {
+      if (!confirm("确定删除这篇文章？")) return;
+      DB.posts = DB.posts.filter((x) => x.id !== id);
+      localStorage.removeItem("gb_draft_" + id);
+      persist(); renderPosts();
+    };
+
+    /* ================= 软件项目管理 ================= */
+    let tmpShots = [], tmpPlatforms = [];
+    function renderApps() {
+      appItems.innerHTML = DB.projects.map((p) =>
+        `<div class="glass p-4">
+           <div class="flex items-center gap-2">
+             <span class="text-sm font-medium flex-1 truncate">${GB.esc(p.name)}</span>
+             <span class="glass-sm px-2 py-0.5 text-xs text-accent">v${GB.esc(p.version)}</span>
+           </div>
+           <div class="mt-1 text-xs text-secondary line-clamp-1">${GB.esc(p.desc)}</div>
+           <div class="mt-3 flex gap-2 text-xs">
+             <button onclick="editApp('${p.id}')" class="glass-sm px-3 py-1">编辑</button>
+             <button onclick="delApp('${p.id}')" class="glass-sm px-3 py-1 text-red-500">删除</button>
+           </div>
+         </div>`).join("");
+    }
+    window.editApp = (id) => {
+      curApp = id;
+      const p = id ? DB.projects.find((x) => x.id === id) : null;
+      appEditorTitle.textContent = p ? "编辑软件" : "新增软件";
+      aName.value = p?.name || "";
+      aVersion.value = p?.version || "";
+      aDesc.value = p?.desc || "";
+      aChangelog.value = p?.changelog || "";
+      tmpShots = [...(p?.screenshots || [])];
+      tmpPlatforms = (p?.platforms || []).map((x) => ({ ...x }));
+      renderShots(); renderPlatforms();
+      appEditor.classList.remove("hidden");
+    };
+    window.closeAppEditor = () => appEditor.classList.add("hidden");
+    function renderShots() {
+      aShots.innerHTML = tmpShots.map((s, i) =>
+        `<div class="relative">
+           <img src="${GB.esc(s)}" class="h-20 w-32 object-cover rounded-xl ring-1 ring-[var(--glass-border)]" />
+           <button onclick="tmpShots.splice(${i},1);renderShots()"
+             class="absolute -top-1.5 -right-1.5 glass-sm w-5 h-5 text-xs rounded-full">✕</button>
+         </div>`).join("");
+    }
+    window.addShot = () => { const u = prompt("图片 URL"); if (u) { tmpShots.push(u); renderShots(); } };
+    window.uploadShot = async (input) => {
+      const f = input.files[0]; if (!f) return;
+      try {
+        const { url } = await GB.upload(f, "images"); // 后端模式：真实上传到 uploads/
+        tmpShots.push(url); renderShots();
+      } catch (e) { alert("上传失败：" + e.message); }
+    };
+    function renderPlatforms() {
+      aPlatforms.innerHTML = tmpPlatforms.map((pl, i) =>
+        `<div class="glass-sm p-3 grid sm:grid-cols-[1fr_2fr_auto_auto] gap-2 items-center">
+           <input value="${GB.esc(pl.os)}" placeholder="平台（如 macOS）" onchange="tmpPlatforms[${i}].os=this.value"
+             class="px-3 py-1.5 text-sm bg-transparent outline-none" />
+           <input value="${GB.esc(pl.url)}" placeholder="下载地址 URL" onchange="tmpPlatforms[${i}].url=this.value"
+             class="px-3 py-1.5 text-sm bg-transparent outline-none" />
+           <label class="glass-sm px-3 py-1.5 text-xs cursor-pointer whitespace-nowrap">上传包
+             <input type="file" class="hidden" onchange="uploadPkg(this,${i})" /></label>
+           <button onclick="tmpPlatforms.splice(${i},1);renderPlatforms()" class="text-xs text-red-500 px-1">删除</button>
+         </div>`).join("");
+    }
+    window.addPlatform = () => { tmpPlatforms.push({ os: "", url: "", size: "" }); renderPlatforms(); };
+    window.uploadPkg = async (input, i) => {
+      const f = input.files[0]; if (!f) return;
+      try {
+        const { url, size } = await GB.upload(f, "packages"); // 后端模式：真实上传到 downloads/
+        tmpPlatforms[i].url = url;
+        if (size) tmpPlatforms[i].size = (size / 1048576).toFixed(1) + " MB";
+        renderPlatforms();
+      } catch (e) { alert("上传失败：" + e.message); }
+    };
+    window.saveApp = () => {
+      if (!aName.value.trim()) return alert("请填写软件名称");
+      const base = {
+        name: aName.value.trim(),
+        version: aVersion.value.trim() || "1.0.0",
+        desc: aDesc.value.trim(),
+        changelog: aChangelog.value,
+        screenshots: tmpShots,
+        platforms: tmpPlatforms.filter((x) => x.os || x.url),
+      };
+      if (curApp) Object.assign(DB.projects.find((x) => x.id === curApp), base);
+      else DB.projects.unshift({
+        id: "app-" + Date.now().toString(36),
+        date: GBSchema.localDateStr(), // 本地时区（修正 UTC 偏差）
+        ...base,
+      });
+      persist(); renderApps(); closeAppEditor();
+    };
+    window.delApp = (id) => {
+      if (!confirm("确定删除该软件项目？")) return;
+      DB.projects = DB.projects.filter((x) => x.id !== id);
+      persist(); renderApps();
+    };
+
+    /* ================= 个人信息管理 ================= */
+    let tmpSocials = [], avatarData = "";
+    function renderProfileForm() {
+      const pf = DB.profile;
+      pfName.value = pf.name;
+      pfBio.value = pf.bio;
+      avatarData = pf.avatar;
+      pfAvatarImg.src = pf.avatar;
+      tmpSocials = (pf.socials || []).map((s) => ({ ...s }));
+      renderSocials();
+    }
+    function renderSocials() {
+      pfSocials.innerHTML = tmpSocials.map((s, i) =>
+        `<div class="glass-sm p-2.5 grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
+           <input value="${GB.esc(s.name)}" placeholder="名称" onchange="tmpSocials[${i}].name=this.value"
+             class="px-3 py-1.5 text-sm bg-transparent outline-none" />
+           <input value="${GB.esc(s.url)}" placeholder="链接 URL" onchange="tmpSocials[${i}].url=this.value"
+             class="px-3 py-1.5 text-sm bg-transparent outline-none" />
+           <button onclick="tmpSocials.splice(${i},1);renderSocials()" class="text-xs text-red-500 px-1">删除</button>
+         </div>`).join("");
+    }
+    window.addSocial = () => { tmpSocials.push({ name: "", url: "" }); renderSocials(); };
+    window.uploadAvatar = async (input) => {
+      const f = input.files[0]; if (!f) return;
+      try {
+        const { url } = await GB.upload(f, "images"); // 后端模式：真实上传到 uploads/
+        avatarData = url; pfAvatarImg.src = url;
+      } catch (e) { alert("上传失败：" + e.message); }
+    };
+    window.saveProfile = () => {
+      DB.profile = {
+        name: pfName.value.trim() || DB.profile.name,
+        bio: pfBio.value,
+        avatar: avatarData,
+        socials: tmpSocials.filter((s) => s.name && s.url),
+      };
+      persist();
+    };
+
+    /* ================= 数据导入导出 ================= */
+    window.exportJSON = () => {
+      const blob = new Blob([JSON.stringify(DB, null, 2)], { type: "application/json" });
+      const a = Object.assign(document.createElement("a"), {
+        href: URL.createObjectURL(blob), download: "content.json",
+      });
+      a.click();
+    };
+    window.importJSON = () => {
+      const input = Object.assign(document.createElement("input"), { type: "file", accept: ".json" });
+      input.onchange = () => {
+        const r = new FileReader();
+        r.onload = () => {
+          try {
+            const data = JSON.parse(r.result);
+            if (!data.profile || !Array.isArray(data.posts) || !Array.isArray(data.projects))
+              return alert("备份文件结构不完整（需要 profile / posts / projects）");
+            if (!confirm(`备份包含 ${data.posts.length} 篇文章、${data.projects.length} 个软件。\n导入将覆盖当前全部内容，确定？`)) return;
+            // 统一走数据契约：旧版备份自动迁移 + 字段规范化（slug/createdAt/updatedAt 等）
+            GBSchema.migrate(data);
+            DB = data;
+            persist(); renderPosts(); renderApps(); renderProfileForm();
+          } catch { alert("JSON 格式无效"); }
+        };
+        r.readAsText(input.files[0]);
+      };
+      input.click();
+    };
+    window.resetData = async () => {
+      if (!confirm("将清空后台所有修改并恢复为 data/content.json 的默认内容，确定？")) return;
+      DB = await GB.reset();
+      renderPosts(); renderApps(); renderProfileForm();
+    };
+
+    /* ================= 自动备份历史（仅后端模式） ================= */
+    async function renderBackups() {
+      if (!GB.isApi()) return; // 静态演示模式无服务端备份
+      backupBox.classList.remove("hidden");
+      try {
+        const { backups } = await GB.backups();
+        backupList.innerHTML = backups.length ? backups.map((b) => {
+          const t = new Date(b.mtime).toLocaleString("zh-CN", { hour12: false });
+          return `<div class="glass-sm px-4 py-2.5 flex items-center gap-3">
+            <div class="flex-1 min-w-0">
+              <div class="text-sm">${t}</div>
+              <div class="text-xs text-secondary truncate">${GB.esc(b.file)} · ${(b.size / 1024).toFixed(1)} KB</div>
+            </div>
+            <button data-restore="${GB.esc(b.file)}" data-time="${t}"
+              class="glass-sm glass-hover px-3 py-1.5 text-xs text-accent shrink-0">恢复此版本</button>
+          </div>`;
+        }).join("") : `<p class="text-xs text-secondary">暂无备份，首次保存内容后自动生成。</p>`;
+      } catch (e) {
+        backupList.innerHTML = `<p class="text-xs text-secondary">${GB.esc(e.message)}</p>`;
+        if (/未登录/.test(e.message)) logout();
+      }
+    }
+    // 事件委托：恢复按钮（列表为动态渲染）
+    backupList.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-restore]");
+      if (!btn) return;
+      if (!confirm(`确定恢复到 ${btn.dataset.time} 的备份吗？\n\n当前内容会先自动再备份一份（可反悔），恢复后页面将刷新。`)) return;
+      try {
+        await GB.restore(btn.dataset.restore);
+        alert("恢复成功，页面即将刷新。");
+        location.reload();
+      } catch (err) {
+        alert("恢复失败：" + err.message);
+        if (/未登录/.test(err.message)) logout();
+      }
+    });
+
+    /* ================= 初始化 ================= */
+    async function init() {
+      if (DB) return;
+      DB = await GB.load();
+      renderPosts(); renderApps(); renderProfileForm();
+      switchTab("posts");
+      // 显示当前数据模式：后端（多端同步）/ 静态演示
+      modeBadge.textContent = GB.isApi() ? "已连接后端 · 多端同步" : "静态演示模式 · 仅本机保存";
+      renderBackups(); // 后端模式展示自动备份历史
+      GB.emit("admin:ready", { isApi: GB.isApi() }); // 模块挂钩点
+    }
+    checkAuth();
+  </script>
+</body>
+</html>

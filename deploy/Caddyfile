@@ -1,0 +1,28 @@
+# GlassBlog Caddy 配置（推荐：自动申请并续期 HTTPS 证书）
+# 1. 安装 Caddy：https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+# 2. 把 blog.example.com 改成你的域名（DNS 已解析到服务器 IP）
+# 3. sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+# 4. sudo systemctl reload caddy
+
+blog.example.com {
+	# 反向代理到本机 Node 服务（端口与 systemd 中 PORT 保持一致）
+	reverse_proxy 127.0.0.1:8899
+
+	# 上传体积上限（安装包最大 500MB，与服务端一致）
+	request_body {
+		max_size 500MB
+	}
+
+	# 安全响应头（服务端已设置，这里兜底一层）
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# 访问日志
+	log {
+		output file /var/log/caddy/glassblog-access.log
+	}
+}
