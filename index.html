@@ -13,19 +13,69 @@
   <script src="assets/js/tailwind.min.js"></script>
   <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
   <link rel="alternate" type="application/rss+xml" title="GlassBlog RSS" href="rss.xml" />
+  <style>
+    /* 日历热点（GitHub 贡献图风格）：列数由脚本按周数写入 grid-template-columns */
+    .heatmap {
+      display: grid;
+      grid-template-rows: 12px repeat(7, 9px);
+      gap: 2px;
+      width: max-content;
+    }
+    .hm-month { font-size: 9px; line-height: 12px; color: var(--text-2); white-space: nowrap; }
+    .hm-day { font-size: 9px; line-height: 9px; color: var(--text-2); text-align: right; padding-right: 2px; }
+    .hm-cell {
+      width: 9px; height: 9px; border-radius: 2px;
+      background: rgba(120, 120, 128, 0.16);
+      transition: transform 0.12s ease;
+    }
+    /* :where() 不参与优先级：深色底色的优先级仍低于下方各级颜色，避免覆盖热力等级 */
+    :where(html.dark) .hm-cell { background: rgba(120, 120, 128, 0.22); }
+    .hm-cell[data-l="1"] { background: rgba(0, 113, 227, 0.30); }
+    .hm-cell[data-l="2"] { background: rgba(0, 113, 227, 0.52); }
+    .hm-cell[data-l="3"] { background: rgba(0, 113, 227, 0.75); }
+    .hm-cell[data-l="4"] { background: rgba(0, 113, 227, 1); }
+    .hm-cell:hover { transform: scale(1.25); }
+    .hm-cell[data-future] { background: transparent; }
+  </style>
 </head>
 <body class="min-h-screen antialiased">
   <nav id="nav"></nav>
 
   <main class="max-w-3xl mx-auto px-5 pt-32 pb-20 space-y-8">
-    <!-- 个人卡片 -->
-    <section class="glass fade-in p-10 flex flex-col items-center text-center">
-      <img id="avatar" alt="头像"
-        class="w-24 h-24 rounded-full object-cover ring-1 ring-[var(--glass-border)] shadow-lg" />
-      <h1 id="profileName" class="mt-5 text-3xl font-semibold tracking-tight"></h1>
-      <p id="bio" class="mt-3 text-secondary leading-relaxed max-w-md"></p>
-      <div id="socials" class="mt-6 flex flex-wrap justify-center gap-3"></div>
-    </section>
+    <!-- 个人卡片 + 日历热点：md 及以上并排，窄屏纵向堆叠 -->
+    <div class="grid gap-4 md:grid-cols-2">
+      <!-- 个人卡片（GitHub 风格：头像 + 信息紧凑横向排布） -->
+      <section class="glass fade-in p-5 sm:p-6 flex flex-col justify-center">
+        <div class="flex items-center gap-4">
+          <img id="avatar" alt="头像"
+            class="w-14 h-14 sm:w-16 sm:h-16 rounded-full object-cover ring-1 ring-[var(--glass-border)] shrink-0" />
+          <div class="min-w-0">
+            <h1 id="profileName" class="text-xl font-semibold tracking-tight leading-tight"></h1>
+            <p id="bio" class="mt-1 text-sm text-secondary leading-snug"></p>
+          </div>
+        </div>
+        <div id="socials" class="mt-4 flex flex-wrap items-center gap-2"></div>
+      </section>
+
+      <!-- 日历热点（真实数据：已发布文章 + 备忘录） -->
+      <section class="glass fade-in min-w-0 p-4 sm:p-5 flex flex-col justify-center" style="animation-delay:.05s">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm font-semibold flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-secondary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+              <path d="M3.5 9.5h17" />
+              <path d="M8 3v3.5M16 3v3.5" />
+            </svg>
+            日历热点
+          </h2>
+          <span id="heatTotal" class="text-[11px] text-secondary"></span>
+        </div>
+        <div class="overflow-x-auto pb-0.5">
+          <div id="heatGrid" class="heatmap"></div>
+        </div>
+      </section>
+    </div>
 
     <!-- 最新文章 -->
     <section class="fade-in" style="animation-delay:.1s">
@@ -51,7 +101,7 @@
   </main>
 
   <script src="assets/js/schema.js?v=20261013"></script>
-  <script src="assets/js/common.js?v=20261013c"></script>
+  <script src="assets/js/common.js?v=20261014e"></script>
   <script>
     GB.renderNav("home");
     (async () => {
@@ -64,8 +114,59 @@
       bio.textContent = data.profile.bio;
       socials.innerHTML = (data.profile.socials || []).map((s) =>
         `<a href="${GB.esc(s.url)}" target="_blank" rel="noopener"
-           class="glass-sm px-4 py-1.5 text-sm text-secondary hover:text-accent">${GB.esc(s.name)}</a>`
+           class="glass-sm px-3 py-1 text-xs text-secondary hover:text-accent">${GB.esc(s.name)}</a>`
       ).join("");
+
+      // 日历热点：按自然周（周日起）聚合已发布文章与备忘录的真实日期
+      const ymd = (dt) =>
+        `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+      const counts = {};
+      const bump = (s) => {
+        const k = String(s || "").slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(k)) counts[k] = (counts[k] || 0) + 1;
+      };
+      data.posts.filter((p) => p.status === "published").forEach((p) => bump(p.createdAt || p.date));
+      (data.memos || []).forEach((m) => bump(m.createdAt));
+
+      const levelOf = (n) => (n === 0 ? 0 : n === 1 ? 2 : n === 2 ? 3 : 4);
+      const WEEKS = 24; // 近半年，兼顾数据密度与移动端宽度
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = new Date(today);
+      start.setDate(start.getDate() - today.getDay() - (WEEKS - 1) * 7); // 回溯到起始周的周日
+
+      const heatGrid = document.getElementById("heatGrid");
+      heatGrid.style.gridTemplateColumns = `auto repeat(${WEEKS}, 9px)`; // 第 1 列留给星期标签
+      const cells = [];
+      // 星期标签：仅标一/三/五，与 GitHub 一致
+      ["", "一", "", "三", "", "五", ""].forEach((t, i) => {
+        if (t) cells.push(`<span class="hm-day" style="grid-row:${i + 2};grid-column:1">${t}</span>`);
+      });
+      let total = 0;
+      let lastMonth = -1;
+      for (let i = 0; i < WEEKS * 7; i++) {
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        const col = Math.floor(i / 7) + 2; // 第 1 行留给月份标签
+        const row = (i % 7) + 2;
+        if (i % 7 === 0 && d.getMonth() !== lastMonth) {
+          lastMonth = d.getMonth();
+          cells.push(`<span class="hm-month" style="grid-row:1;grid-column:${col}">${lastMonth + 1}月</span>`);
+        }
+        if (d > today) {
+          // 未来日期渲染为空占位，保持网格按周对齐
+          cells.push(`<span class="hm-cell" data-future="1" style="grid-row:${row};grid-column:${col}"></span>`);
+          continue;
+        }
+        const key = ymd(d);
+        const n = counts[key] || 0;
+        total += n;
+        cells.push(
+          `<span class="hm-cell" data-l="${levelOf(n)}" style="grid-row:${row};grid-column:${col}" title="${key} · ${n} 条"></span>`
+        );
+      }
+      heatGrid.innerHTML = cells.join("");
+      heatTotal.textContent = `近 ${WEEKS} 周 · ${total} 次活跃`;
 
       // 最新 3 篇已发布文章（按创建时刻排序）
       const posts = data.posts

@@ -51,10 +51,10 @@ GB.register("auth", {
     function buildModal() {
       const wrap = document.createElement("div");
       wrap.id = "gbAuthModal";
-      wrap.hidden = true;
-      // 全屏遮罩：点击遮罩不关闭，必须主动登录或点取消
+      // 全屏遮罩：点击遮罩不关闭，必须主动登录或点取消。
+      // 注意：hidden 属性会被内联 display:flex 覆盖，显隐统一用 style.display 控制
       wrap.style.cssText =
-        "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;" +
+        "position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;" +
         "background:rgba(0,0,0,0.28);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);";
       wrap.innerHTML = `
         <div style="width:min(360px,calc(100vw - 2.5rem));padding:2rem 1.75rem;border-radius:24px;
@@ -105,12 +105,12 @@ GB.register("auth", {
 
     function showModal() {
       if (!_modal) _modal = buildModal();
-      _modal.hidden = false;
+      _modal.style.display = "flex";
       _modal.querySelector("#gbAuthErr").textContent = "";
       setTimeout(() => _modal.querySelector("#gbAuthUser").focus(), 0);
     }
     function hideModal() {
-      if (_modal) _modal.hidden = true;
+      if (_modal) _modal.style.display = "none";
     }
 
     /* ---------- 挂到 GB.auth 供全局调用 ---------- */

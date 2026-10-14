@@ -13,13 +13,23 @@ blog.example.com {
 		max_size 500MB
 	}
 
-	# 安全响应头（服务端已设置，这里兜底一层）
+	# 安全响应头（与 server.js SEC_HEADERS 对齐，这里兜底一层）
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
 	}
+
+	# HTML 页面（含 memos.html / admin.html）不缓存，保证发布与改动即时可见
+	@html path / *.html
+	header @html Cache-Control "no-cache"
+
+	# 静态资源长缓存（与 server.js 对齐：assets/uploads 1 天，downloads 1 小时）
+	@assets path /assets/* /uploads/*
+	header @assets Cache-Control "public, max-age=86400"
+	@downloads path /downloads/*
+	header @downloads Cache-Control "public, max-age=3600"
 
 	# 访问日志
 	log {

@@ -24,6 +24,20 @@ highlight.js（代码高亮，仅页面含代码块时按需懒加载，主题�
 - 标题搜索 + 全部/已发布/草稿/已下架 状态筛选
 - 已有标签 chips 一键点选填入；封面图 URL 或本地上传（带预览）；摘要留空自动生成
 
+**前台 · 备忘录（Memos 风格）**
+
+- 时间线发布，支持 Markdown、标签、置顶、归档、可见性（公开 / 私密）
+- 私密备忘可生成带有效期的分享链接，令牌校验后免登录查看单条
+- 全站浮层「+」快速发布；正文图片支持粘贴 / 拖拽上传与灯箱预览
+
+**后台 · 备忘管理 / Agent 定时任务 / Bot 控制台**
+
+- 备忘管理：发布、编辑（rev 乐观锁冲突提示）、置顶、归档、可见性、删除、分享
+- Agent 定时任务：五种调度规则（daily / weekly / monthly / once / interval）、失败重试、
+  错过任务可配置补跑（catchUp）、一次性任务执行后自动禁用、执行日志按月归档
+- Bot 控制台：白名单指令引擎（帮助 / 统计 / 搜博客 / 备忘 / 发布 / 备份 / 新建任务），
+  支持单轮分步引导、对话历史持久化，私密备忘内容含 `@bot` 时自动执行并追加回复
+
 **前台 · 博客页**
 
 - 文章搜索（标题/摘要/正文，`/` 键快速聚焦）、标签筛选 chips、阅读时间、封面图（懒加载）
@@ -39,7 +53,7 @@ highlight.js（代码高亮，仅页面含代码块时按需懒加载，主题�
 - 三页均有 description / OG meta；RSS 输出全文（`content:encoded`，服务端零依赖 Markdown 渲染）且链接为 `?p=` 直链
 - 玻璃风 404 页：页面类请求 404 时自动回退渲染 `404.html`，资源类请求保持纯文本 404
 - 后台「个人信息」页内置数据备份：整站 JSON 导出下载、导入恢复（结构校验 + 二次确认）、一键恢复默认
-- 服务端每次保存前自动备份 `data/backups/`（保留 20 份），双保险
+- 服务端每次保存前自动备份 `data/backups/`（分级保留：近 7 天每天 1 份 / 近 4 周每周 1 份 / 更早每月 1 份），双保险
 
 支持两种运行模式，**自动探测，无需任何配置**：
 
@@ -54,9 +68,10 @@ highlight.js（代码高亮，仅页面含代码块时按需懒加载，主题�
 ├── index.html            # 前台 · 个人主页
 ├── blog.html             # 前台 · 博客列表 + 归档 + 文章详情（hash / ?p= 双路由）
 ├── apps.html             # 前台 · 软件发布下载页
+├── memos.html            # 前台 · 备忘录（时间线 / 标签 / 搜索 / 分享）
 ├── 404.html              # 玻璃风 404 页（server.js 对页面类 404 自动回退）
-├── admin.html            # 后台管理系统（文章/软件/个人信息/访问统计）
-├── server.js             # 零依赖 Node 后端（静态服务 + API + 上传 + 认证 + 统计 + RSS）
+├── admin.html            # 后台管理系统（文章/软件/备忘/Agent/Bot/个人信息/访问统计）
+├── server.js             # 零依赖 Node 后端（静态服务 + API + 上传 + 认证 + 调度器 + Bot + 统计 + RSS）
 ├── assets/
 │   ├── css/glass.css     # 液态玻璃主题核心（所有样式参数集中在顶部 CSS 变量）
 │   └── js/
@@ -64,13 +79,21 @@ highlight.js（代码高亮，仅页面含代码块时按需懒加载，主题�
 │       ├── tailwind.min.js   # Tailwind 运行时（本地化，已移除生产警告；升级时从 cdn.tailwindcss.com 下载同名替换）
 │       └── modules/          # 功能模块目录（框架化扩展点，见「模块化开发指南」）
 │           ├── index.js          # 模块清单：按页登记要加载的模块
+│           ├── auth.js           # 登录态处理
 │           ├── back-to-top.js    # 内置模块：回到顶部按钮（全站）
-│           └── image-zoom.js     # 内置模块：正文图片灯箱（博客详情页）
+│           ├── image-zoom.js     # 内置模块：正文 / 备忘图片灯箱
+│           ├── memos-list.js     # 备忘：时间线列表 + 浮层快速发布
+│           ├── memos-detail.js   # 备忘：单条渲染 + 分享
+│           ├── admin-memos.js    # 后台：备忘管理
+│           ├── admin-agent.js    # 后台：Agent 定时任务
+│           └── admin-bot.js      # 后台：Bot 控制台
 ├── data/
-│   ├── content.json      # 内容数据源（个人资料 / 文章 / 软件项目）
+│   ├── content.json      # 内容数据源（个人资料 / 文章 / 软件项目 / 备忘 / Agent 任务）
 │   ├── sessions.json     # 登录令牌（运行时自动生成，勿入库）
 │   ├── stats.json        # 访问统计（运行时自动生成，勿入库）
-│   └── backups/          # 内容自动备份（每次保存前一份，保留 20 份）
+│   ├── audit.log         # 审计日志（登录/保存/上传等，自动清理 90 天前，勿入库）
+│   ├── agent-logs-YYYY-MM.json  # Agent 执行日志（按月归档，每月 ≤500 条，勿入库）
+│   └── backups/          # 内容自动备份（分级保留：7 天每日 / 4 周每周 / 更早每月）
 ├── uploads/              # 后台上传的图片（截图/头像）
 ├── downloads/            # 软件安装包
 └── deploy/               # Ubuntu 生产部署件（systemd / Caddy / Nginx）
@@ -102,6 +125,7 @@ python3 -m http.server 8899
 | `ADMIN_PASS` | `glass123` | 管理密码（生产必改） |
 | `SITE_URL` | `http://localhost:8899` | 站点对外 URL（用于 RSS / Sitemap / robots 链接） |
 | `TOKEN_TTL_DAYS` | `30` | 登录令牌有效期（天），活跃自动续期 |
+| `TOKEN_BIND_IP` | `false` | 设为 `true` 时令牌与登录 IP 绑定，换 IP 访问视为未登录（反代需透传真实 IP） |
 
 ## 后端 API
 
@@ -111,19 +135,37 @@ python3 -m http.server 8899
 | `POST /api/logout` | 注销并销毁令牌 | Bearer token |
 | `GET /api/content` | 读取全部内容 | 否 |
 | `PUT /api/content` | 保存全部内容（先备份再原子写入） | Bearer token |
-| `POST /api/upload?dir=images\|packages&name=文件名` | 原始字节上传，返回 `{url, size}` | Bearer token |
+| `POST /api/upload?dir=images\|packages&name=文件名` | 原始字节上传（扩展名白名单 + 大小限制 + 文件头魔数校验），返回 `{url, size}` | Bearer token |
 | `POST /api/hit` | 访问上报，body `{path}`（同 IP 同页 30 分钟去重，保留 90 天） | 否 |
 | `GET /api/stats` | 近 30 天聚合统计 `{days, total, pages[]}` | Bearer token |
-| `GET /api/health` | 健康检查 `{ok, uptime}` | 否 |
+| `GET /api/backups` | 备份历史列表（分级保留，字典序即时间序） | Bearer token |
+| `POST /api/restore` | 恢复到指定备份，body `{file}`（恢复前先备份当前内容） | Bearer token |
+| `GET /api/memos` | 备忘列表（未登录仅公开；支持 `tag`/`q`/`from`/`to`/`includeArchived`） | 否 |
+| `GET /api/memos/tags` | 备忘标签云（未登录只统计公开） | 否 |
+| `GET /api/memos/:id` | 单条备忘（私密需登录，或 `?share=有效令牌`） | 否 |
+| `POST /api/memos` | 新建备忘 | Bearer token |
+| `PUT /api/memos/:id` | 更新备忘（rev 乐观锁，冲突返回 409） | Bearer token |
+| `DELETE /api/memos/:id` | 删除备忘 | Bearer token |
+| `POST /api/memos/:id/share` | 生成分享链接，body `{expireHours}`（默认 24） | Bearer token |
+| `GET /api/agent/tasks` | Agent 任务列表（含 nextRunAt / lastStatus / running） | Bearer token |
+| `POST /api/agent/tasks` | 新建任务，body `{schedule, action, params, retry, catchUp}` | Bearer token |
+| `PUT /api/agent/tasks/:id` | 更新任务（含启停 `enabled`） | Bearer token |
+| `DELETE /api/agent/tasks/:id` | 删除任务 | Bearer token |
+| `POST /api/agent/tasks/:id/run` | 立即执行一次（结果写入执行日志） | Bearer token |
+| `GET /api/agent/logs` | Agent 执行日志（倒序分页） | Bearer token |
+| `POST /api/bot/chat` | Bot 指令对话，body `{text}`（≤2000 字，白名单指令引擎） | Bearer token |
+| `GET /api/health` | 健康检查 `{ok, version, uptime, memos, tasks, schemaVersion, scheduler, lastBackup}` | 否 |
 | `GET /rss.xml` | RSS 2.0 订阅源（仅已发布文章，含 `content:encoded` 全文，60 秒缓存） | 否 |
 | `GET /sitemap.xml` | XML 站点地图（主页/博客/软件页 + 全部已发布文章 `?p=` 直链，60 秒缓存） | 否 |
 | `GET /robots.txt` | 爬虫协议（允许全站、屏蔽 `/admin.html`、声明 Sitemap） | 否 |
 
 上传位置：图片 → `uploads/`，安装包 → `downloads/`，文件名自动加时间戳防重名。
 白名单与上限：图片 `.png .jpg .jpeg .gif .webp .svg` ≤ 20MB；安装包 `.zip .dmg .exe .msi .gz .7z .apk` ≤ 500MB。
+落盘后读取前 1KB 校验文件头（魔数），改扩展名伪装的文件会被删除并返回 400。
 
-内置安全与性能：令牌 30 天滑动过期、登录防爆破、安全响应头、gzip 压缩、静态资源缓存分级、
-目录穿越与敏感路径（`/data/`、`/server.js`）拦截、写入前自动备份、SIGTERM 优雅落盘退出。
+内置安全与性能：令牌 30 天滑动过期、可选令牌 IP 绑定（`TOKEN_BIND_IP`）、登录防爆破、安全响应头、
+gzip 压缩、静态资源缓存分级、目录穿越与敏感路径（`/data/`、`/server.js`）拦截、
+写入前自动备份（分级保留）、审计日志（自动清理 90 天前）、SIGTERM 优雅落盘退出。
 
 ## Ubuntu 云服务器部署（生产推荐）
 
@@ -299,7 +341,7 @@ window.GB_MODULES = {
 
 - 单账号 + 随机令牌（存 `data/sessions.json`），无多用户/权限体系；公网使用务必改强密码并启用 HTTPS
 - 多端同步为「保存即覆盖 content.json」的乐观模型，两人同时编辑会互相覆盖（个人单作者场景无影响）
-- 上传做扩展名白名单但未做文件内容校验，请勿把管理后台暴露给不可信用户
+- 上传做扩展名白名单 + 文件头魔数校验，但仍请勿把管理后台暴露给不可信用户
 - 访问统计为隐私友好的页面计数，不是全量日志分析；需要更细数据可另接 Umami
 
 ## 可扩展方向

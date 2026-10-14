@@ -53,5 +53,14 @@ GB.register("image-zoom", {
       const cover = document.getElementById("dCover");
       if (cover && !cover.classList.contains("hidden")) bindImgs([cover]);
     });
+
+    // 备忘录时间线图片同样支持灯箱
+    ctx.on("memos:list", ({ container } = {}) => {
+      if (container) bindImgs(container.querySelectorAll(".memo-body img"));
+    });
+    // 备忘录分享视图渲染完成后挂钩
+    ctx.on("memos:detail:rendered", ({ body } = {}) => {
+      if (body) bindImgs(body.querySelectorAll("img"));
+    });
   },
 });

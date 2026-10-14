@@ -16,11 +16,10 @@
 <body class="min-h-screen antialiased">
   <nav id="nav"></nav>
 
-  <!-- ========== 登录视图（演示账号：admin / glass123） ========== -->
+  <!-- ========== 登录视图 ========== -->
   <div id="loginView" class="hidden min-h-screen flex items-center justify-center px-5">
     <form id="loginForm" class="glass fade-in w-full max-w-sm p-8">
       <h1 class="text-xl font-semibold text-center">管理后台</h1>
-      <p class="mt-1 text-sm text-secondary text-center">默认账号 admin · 密码 glass123（可用环境变量覆盖）</p>
       <input id="loginUser" placeholder="账号" autocomplete="username"
         class="glass-sm mt-6 w-full px-4 py-2.5 text-sm bg-transparent outline-none" />
       <input id="loginPass" type="password" placeholder="密码" autocomplete="current-password"
@@ -51,6 +50,9 @@
       <button data-tab="apps" class="tabBtn px-5 py-1.5 rounded-full text-sm">软件项目</button>
       <button data-tab="profile" class="tabBtn px-5 py-1.5 rounded-full text-sm">个人信息</button>
       <button data-tab="stats" class="tabBtn px-5 py-1.5 rounded-full text-sm">统计</button>
+      <button data-tab="memos" class="tabBtn px-5 py-1.5 rounded-full text-sm">备忘</button>
+      <button data-tab="agent" class="tabBtn px-5 py-1.5 rounded-full text-sm">Agent 任务</button>
+      <button data-tab="bot" class="tabBtn px-5 py-1.5 rounded-full text-sm">Bot 控制台</button>
     </div>
 
     <!-- ===== 文章管理 ===== -->
@@ -226,7 +228,7 @@
         <div id="backupBox" class="hidden mt-5 pt-5" style="border-top:1px solid var(--glass-border)">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-medium">自动备份历史</h3>
-            <span class="text-xs text-secondary">保留最近 20 份</span>
+            <span class="text-xs text-secondary">分级保留：近 7 天每天 1 份 · 近 4 周每周 1 份 · 更早每月 1 份</span>
           </div>
           <div id="backupList" class="mt-3 space-y-2"></div>
         </div>
@@ -260,10 +262,20 @@
         <p id="stTip" class="hidden mt-6 text-sm text-secondary">静态演示模式无统计功能，请使用 <code>node server.js</code> 启动后端。</p>
       </div>
     </section>
+
+    <!-- ===== 备忘管理（admin-memos 模块挂载点） ===== -->
+    <section id="tab-memos" class="hidden"></section>
+
+    <!-- ===== Agent 任务（admin-agent 模块挂载点） ===== -->
+    <section id="tab-agent" class="hidden"></section>
+
+    <!-- ===== Bot 控制台（admin-bot 模块挂载点） ===== -->
+    <section id="tab-bot" class="hidden"></section>
   </div>
 
   <script src="assets/js/schema.js?v=20261013"></script>
-  <script src="assets/js/common.js?v=20261013c"></script>
+  <script src="assets/js/common.js?v=20261014e"></script>
+  <script src="assets/js/store.js?v=20261014"></script>
   <script>
     /* ================= 登录（后端模式走 /api/login 令牌认证；无后端时回退静态演示校验） ================= */
     const AUTH_KEY = "gb_auth";
@@ -316,11 +328,13 @@
     /* ================= 标签页 ================= */
     document.querySelectorAll(".tabBtn").forEach((b) => (b.onclick = () => switchTab(b.dataset.tab)));
     function switchTab(tab) {
-      ["posts", "apps", "profile", "stats"].forEach((k) =>
+      ["posts", "apps", "profile", "stats", "memos", "agent", "bot"].forEach((k) =>
         document.getElementById("tab-" + k).classList.toggle("hidden", k !== tab));
       document.querySelectorAll(".tabBtn").forEach((b) =>
         b.classList.toggle("text-accent", b.dataset.tab === tab));
       if (tab === "stats") loadStats();
+      window.GB_ADMIN_TAB = tab; // 记录当前 Tab：晚加载完成的模块据此补构建
+      GB.emit("admin:tab", { tab }); // 模块挂钩点：新 Tab 由此惰性构建
     }
 
     /* ================= 访问统计 ================= */

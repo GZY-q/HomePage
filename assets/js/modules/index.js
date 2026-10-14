@@ -10,6 +10,6 @@
 window.GB_MODULES = {
   "*": ["back-to-top", "auth"], // 全站：回到顶部 + 全局认证
   blog: ["image-zoom"],         // 博客详情：正文图片灯箱
-  memos: ["image-zoom"],        // 备忘：正文图片灯箱
-  admin: [],
+  memos: ["markdown", "image-zoom", "memos-list", "memos-detail"], // 备忘：原生渲染 + 灯箱 + 任务复选框 + 分享视图
+  admin: ["markdown", "admin-memos", "admin-agent", "admin-bot"],  // 后台：原生渲染 + 备忘管理 + Agent 任务 + Bot 控制台
 };

@@ -15,8 +15,18 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/glassblog
 ExecStart=/usr/bin/node server.js
+# 重启策略：异常退出自动拉起（systemd stop 时发 SIGTERM，服务端会优雅退出）
 Restart=always
 RestartSec=3
+
+# 日志：写入 journal，便于 journalctl -u glassblog 检索
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=glassblog
+# journald 总量上限建议（全局配置，写入 /etc/systemd/journald.conf）：
+#   SystemMaxUse=200M
+#   RateLimitBurst=10000
+# 修改后执行：sudo systemctl restart systemd-journald
 
 # 运行账号（建议非 root；确保该账号对项目目录有读写权限）
 User=www-data
@@ -30,6 +40,13 @@ Environment=ADMIN_PASS=CHANGE_ME_STRONG_PASSWORD
 Environment=SITE_URL=https://blog.example.com
 # 令牌有效期（天），默认 30
 Environment=TOKEN_TTL_DAYS=30
+# 令牌 IP 绑定：开启后换 IP 访问视为未登录（反代未透传真实 IP 时请勿开启）
+# Environment=TOKEN_BIND_IP=true
+# 位于 Caddy/Nginx 反代之后时必须开启：采信 X-Forwarded-For 最右侧值，
+# 登录防爆破锁定与 TOKEN_BIND_IP 均依赖真实客户端 IP
+Environment=TRUST_PROXY=true
+# 备份节流最小间隔（秒），默认 300；删除/导入/恢复前的强制备份不受限
+# Environment=BACKUP_MIN_INTERVAL=300
 
 # 基础安全加固
 NoNewPrivileges=true

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="description" content="GlassBlog 备忘录：随想、任务与碎片的玻璃时间线。" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>备忘 · GlassBlog</title>
+  <!-- 提前恢复主题，避免暗色模式白闪（FOUC）；与 common.js initTheme 逻辑保持一致 -->
+  <script>try{if(localStorage.getItem("gb_theme")==="dark")document.documentElement.classList.add("dark")}catch(e){}</script>
+  <script src="assets/js/tailwind.min.js"></script>
+  <script src="assets/js/vendor/highlight.min.js?v=20261013"></script>
+  <link rel="stylesheet" href="assets/css/glass.css?v=20261013c" />
+</head>
+<body class="min-h-screen antialiased">
+  <nav id="nav"></nav>
+
+  <main class="max-w-3xl mx-auto px-5 pt-32 pb-20">
+    <!-- ============ 列表视图 ============ -->
+    <section id="listView">
+      <div class="flex flex-wrap items-end justify-between gap-4 mb-6">
+        <div>
+          <h1 class="text-3xl font-bold tracking-tight">备忘</h1>
+          <p class="text-sm opacity-70 mt-1">随想、任务与碎片灵感的时间线。</p>
+        </div>
+        <div id="viewBtns" class="flex gap-2">
+          <button class="chip on" data-view="timeline">时间线</button>
+          <button class="chip" data-view="archived">归档</button>
+        </div>
+      </div>
+
+      <!-- 工具栏：搜索 + 标签 + 时间范围 -->
+      <div class="glass rounded-2xl p-4 mb-5 space-y-3">
+        <div class="relative">
+          <input id="searchInput" type="search" placeholder="搜索备忘内容…（按 / 快速聚焦）"
+            class="w-full glass-sm rounded-xl px-4 py-2.5 text-sm outline-none bg-transparent" autocomplete="off" />
+          <kbd class="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-50 border border-current rounded px-1.5 py-0.5 pointer-events-none">/</kbd>
+        </div>
+        <div id="tagBar" class="flex flex-wrap gap-2"></div>
+        <div id="timeBar" class="flex flex-wrap gap-2">
+          <button class="chip on" data-range="all">全部</button>
+          <button class="chip" data-range="today">今天</button>
+          <button class="chip" data-range="week">本周</button>
+          <button class="chip" data-range="month">本月</button>
+        </div>
+      </div>
+
+      <!-- 未登录提示 -->
+      <div id="guestTip" class="hidden glass rounded-2xl p-4 mb-5 text-sm opacity-80">
+        当前仅展示公开备忘。<button id="guestLoginBtn" class="chip ml-2">登录</button> 查看全部内容并进行管理。
+      </div>
+
+      <!-- 时间线 -->
+      <div id="memoList" class="space-y-4"></div>
+      <div id="pager" class="flex justify-center gap-2 mt-8"></div>
+
+      <div id="emptyTip" class="hidden text-center py-16 opacity-60 text-sm">
+        <p class="text-4xl mb-3">📝</p>
+        <p>暂无备忘。点击右下角「+」记录第一条想法。</p>
+      </div>
+    </section>
+
+    <!-- ============ 分享视图 ============ -->
+    <section id="shareView" class="hidden">
+      <div id="shareBody"></div>
+    </section>
+    <footer class="text-center text-sm text-secondary pt-12">© 2026 GlassBlog</footer>
+  </main>
+  <!-- 悬浮快速发布按钮 -->
+  <button id="fabAdd" class="glass glass-hover hidden fixed z-40 w-14 h-14 rounded-full text-2xl font-light shadow-lg"
+    style="right: max(1.25rem, env(safe-area-inset-right)); bottom: max(5.5rem, calc(env(safe-area-inset-bottom) + 5rem));"
+    aria-label="快速发布备忘">+</button>
+
+  <!-- 快速发布弹层 -->
+  <div id="quickBox" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+    style="background: rgba(0,0,0,.45); backdrop-filter: blur(6px);">
+    <div class="glass rounded-2xl w-full max-w-lg p-5 fade-in" role="dialog" aria-label="快速发布备忘">
+      <h2 class="text-base font-semibold mb-3">快速备忘</h2>
+      <textarea id="qContent" rows="4" placeholder="记录此刻的想法… 支持 Markdown（回车发布，Shift+回车换行）"
+        class="w-full glass-sm rounded-xl px-4 py-3 text-sm outline-none bg-transparent resize-y"></textarea>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <input id="qTags" type="text" placeholder="标签（逗号分隔，可空）"
+          class="flex-1 min-w-[10rem] glass-sm rounded-xl px-3 py-2 text-sm outline-none bg-transparent" />
+        <select id="qVis" class="glass-sm rounded-xl px-3 py-2 text-sm outline-none bg-transparent">
+          <option value="private">私密</option>
+          <option value="public">公开</option>
+        </select>
+        <button id="qPublish" class="chip on">发布</button>
+        <button id="qCancel" class="chip">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/schema.js?v=20261013"></script>
+  <script src="assets/js/common.js?v=20261014e"></script>
+  <script src="assets/js/store.js?v=20261014"></script>
+  <script>
+    (function () {
+      "use strict";
+      var PAGE_SIZE = 10;
+
+      // ---------- 视图状态 ----------
+      var state = {
+        view: "timeline",      // timeline | archived
+        q: "",
+        tag: "",
+        range: "all",          // all | today | week | month
+        page: 1,
+        all: [],               // 当前可见范围内（已按权限过滤）的备忘全集
+        tags: []
+      };
+
+      var $ = function (id) { return document.getElementById(id); };
+      var listView = $("listView"), shareView = $("shareView");
+      var memoList = $("memoList"), pager = $("pager"), emptyTip = $("emptyTip");
+      var searchInput = $("searchInput"), tagBar = $("tagBar"), timeBar = $("timeBar");
+      var viewBtns = $("viewBtns"), guestTip = $("guestTip");
+      var fabAdd = $("fabAdd"), quickBox = $("quickBox");
+      var qContent = $("qContent"), qTags = $("qTags"), qVis = $("qVis");
+
+      // ---------- 数据层 ----------
+      // 统一下沉到 GB.store（store.js）：后端走 /api/memos，静态托管走 localStorage，
+      // 页面代码与两种驱动解耦（v3 6.2）。分享在静态模式下不可用（share 返回 null）。
+      var store = GB.store.memos;
+
+      // ---------- 工具 ----------
+      function esc(s) { return GB.esc(String(s == null ? "" : s)); }
+
+      function fmtTime(iso) {
+        if (!iso) return "";
+        var d = new Date(iso);
+        var now = new Date();
+        var sameDay = d.toDateString() === now.toDateString();
+        var hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        if (sameDay) return "今天 " + hm;
+        return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
+               String(d.getDate()).padStart(2, "0") + " " + hm;
+      }
+
+      function inRange(m, range) {
+        if (range === "all") return true;
+        var t = new Date(m.createdAt).getTime();
+        var now = new Date();
+        if (range === "today") {
+          var s = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+          return t >= s;
+        }
+        if (range === "week") {
+          var day = (now.getDay() + 6) % 7; // 周一为一周开始
+          var ws = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day).getTime();
+          return t >= ws;
+        }
+        if (range === "month") {
+          var ms = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+          return t >= ms;
+        }
+        return true;
+      }
+
+      // 排序：置顶优先，其余按时间倒序
+      function sortMemos(list) {
+        return list.slice().sort(function (a, b) {
+          if (!!b.pinned !== !!a.pinned) return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+          return new Date(b.createdAt) - new Date(a.createdAt);
+        });
+      }
+
+      function applyFilters() {
+        var list = state.all.filter(function (m) {
+          if (state.view === "archived" ? !m.archived : m.archived) return false;
+          if (state.tag && (m.tags || []).indexOf(state.tag) < 0) return false;
+          if (state.q) {
+            var q = state.q.toLowerCase();
+            var hit = (m.content || "").toLowerCase().indexOf(q) >= 0 ||
+              (m.tags || []).some(function (t) { return t.toLowerCase().indexOf(q) >= 0; });
+            if (!hit) return false;
+          }
+          return inRange(m, state.range);
+        });
+        return sortMemos(list);
+      }
+
+      // ---------- 卡片渲染 ----------
+      function cardHTML(m) {
+        var logged = GB.auth.check();
+        var tags = (m.tags || []).map(function (t) {
+          return '<button class="chip memo-tag" data-tag="' + esc(t) + '">#' + esc(t) + "</button>";
+        }).join(" ");
+        var ops = logged ? (
+          '<div class="flex gap-1.5 mt-3 pt-3 border-t border-white/10 text-xs">' +
+            // 分享依赖服务端令牌校验，静态模式（localStorage 仅本机）下入口隐藏
+            (store.isApi ? '<button class="chip memo-op" data-op="share" title="生成分享链接">分享</button>' : "") +
+            '<button class="chip memo-op" data-op="pin">' + (m.pinned ? "取消置顶" : "置顶") + "</button>" +
+            '<button class="chip memo-op" data-op="archive">' + (m.archived ? "取消归档" : "归档") + "</button>" +
+            '<button class="chip memo-op" data-op="vis">' + (m.visibility === "public" ? "设为私密" : "设为公开") + "</button>" +
+            '<button class="chip memo-op text-red-400" data-op="del">删除</button>' +
+          "</div>"
+        ) : "";
+        return '<article class="glass glass-hover rounded-2xl p-5 fade-in memo-card" data-id="' + esc(m.id) +
+          '" data-rev="' + (m.rev || 1) + '">' +
+          '<div class="flex items-center gap-2 text-xs opacity-70 mb-2">' +
+            (m.pinned ? '<span class="chip on">置顶</span>' : "") +
+            (m.visibility === "public" ? '<span class="chip">公开</span>' : "") +
+            (m.archived ? '<span class="chip">已归档</span>' : "") +
+            '<time>' + esc(fmtTime(m.createdAt)) + "</time>" +
+          "</div>" +
+          '<div class="memo-body prose-glass text-sm leading-relaxed">' + GB.mdLite(m.content || "") + "</div>" +
+          (tags ? '<div class="flex flex-wrap gap-1.5 mt-3">' + tags + "</div>" : "") +
+          ops +
+        "</article>";
+      }
+
+      // 启用渲染产物中的任务复选框：去掉 disabled，按出现顺序编号
+      function enableCheckboxes(root) {
+        var boxes = root.querySelectorAll('.memo-body input[type="checkbox"]');
+        boxes.forEach(function (cb, i) {
+          cb.disabled = false;
+          cb.dataset.idx = i;
+          cb.classList.add("memo-task-cb");
+        });
+      }
+
+      // ---------- 列表渲染 ----------
+      function renderList() {
+        var filtered = applyFilters();
+        var total = filtered.length;
+        var pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+        if (state.page > pages) state.page = pages;
+        var list = filtered.slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE);
+
+        memoList.innerHTML = list.map(cardHTML).join("");
+        emptyTip.classList.toggle("hidden", total > 0);
+        memoList.querySelectorAll(".memo-card").forEach(enableCheckboxes);
+
+        // 分页
+        if (pages > 1) {
+          var btns = "";
+          for (var p = 1; p <= pages; p++) {
+            btns += '<button class="chip' + (p === state.page ? " on" : "") + '" data-page="' + p + '">' + p + "</button>";
+          }
+          pager.innerHTML = btns;
+        } else {
+          pager.innerHTML = "";
+        }
+
+        var payload = { list: list, container: memoList, store: store, reload: reload };
+        // 模块晚加载兜底：供 memos-list 等模块 init 时补渲染
+        window.GB_MEMOS.lastListPayload = payload;
+        GB.emit("memos:list", payload);
+      }
+
+      function renderTags() {
+        var html = '<button class="chip' + (state.tag ? "" : " on") + '" data-tag="">全部标签</button>';
+        html += state.tags.map(function (t) {
+          return '<button class="chip' + (state.tag === t.name ? " on" : "") + '" data-tag="' + esc(t.name) +
+            '">#' + esc(t.name) + " " + t.count + "</button>";
+        }).join("");
+        tagBar.innerHTML = html;
+      }
+
+      async function reload() {
+        try {
+          // 归档视图需要完整数据集再客户端分流，保证两种模式行为一致
+          state.all = await store.list({ archived: true });
+          state.tags = await store.tags();
+          renderTags();
+          renderList();
+        } catch (e) {
+          memoList.innerHTML = '<div class="glass rounded-2xl p-5 text-sm opacity-70">加载失败：' + esc(e.message || e) + "</div>";
+        }
+      }
+
+      // ---------- 分享视图 ----------
+      async function renderShare(id, token) {
+        listView.classList.add("hidden");
+        fabAdd.classList.add("hidden");
+        shareView.classList.remove("hidden");
+        var body = $("shareBody");
+        try {
+          var memo = await store.get(id, token);
+          var payload = { memo: memo, container: body };
+          window.GB_MEMOS.lastDetailPayload = payload;
+          GB.emit("memos:detail", payload);
+        } catch (e) {
+          body.innerHTML = '<div class="glass rounded-2xl p-8 text-center">' +
+            '<p class="text-3xl mb-3">🔒</p>' +
+            '<p class="text-sm opacity-80">' + esc(e.message || "分享链接无效或已过期") + "</p>" +
+            '<p class="mt-4"><a class="chip inline-block" href="memos.html">返回备忘时间线</a></p></div>';
+        }
+      }
+
+      // ---------- 快速发布 ----------
+      function openQuick() {
+        quickBox.classList.remove("hidden");
+        qContent.value = ""; qTags.value = "";
+        setTimeout(function () { qContent.focus(); }, 30);
+      }
+      function closeQuick() { quickBox.classList.add("hidden"); }
+
+      async function quickPublish() {
+        var content = qContent.value.trim();
+        if (!content) { qContent.focus(); return; }
+        var tags = qTags.value.split(/[,，]/).map(function (s) { return s.trim(); }).filter(Boolean);
+        try {
+          await store.create({ content: content, tags: tags, visibility: qVis.value });
+          closeQuick();
+          if (state.view !== "timeline") switchView("timeline");
+          await reload();
+        } catch (e) {
+          alert("发布失败：" + (e.message || e));
+        }
+      }
+
+      // ---------- 操作 ----------
+      async function handleOp(id, op, card) {
+        var rev = parseInt(card.dataset.rev || "1", 10);
+        var memo = state.all.find(function (m) { return m.id === id; });
+        if (!memo) return;
+        try {
+          if (op === "del") {
+            if (!confirm("确定删除这条备忘？")) return;
+            await store.del(id);
+          } else if (op === "pin") {
+            await store.update(id, { pinned: !memo.pinned }, rev);
+          } else if (op === "archive") {
+            await store.update(id, { archived: !memo.archived }, rev);
+          } else if (op === "vis") {
+            await store.update(id, { visibility: memo.visibility === "public" ? "private" : "public" }, rev);
+          } else if (op === "share") {
+            var d = await store.share(id, 72);
+            var url = location.origin + location.pathname.replace(/[^/]*$/, "") + d.url.replace(/^\//, "");
+            try { await navigator.clipboard.writeText(url); alert("分享链接已复制（72 小时有效）：\n" + url); }
+            catch (e2) { prompt("分享链接（72 小时有效）：", url); }
+            return;
+          }
+          await reload();
+        } catch (e) {
+          if (e && e.code === 409) {
+            alert("该备忘已在其他地方被修改，请刷新后重试。");
+          } else {
+            alert("操作失败：" + (e.message || e));
+          }
+        }
+      }
+
+      function switchView(v) {
+        state.view = v;
+        state.page = 1;
+        viewBtns.querySelectorAll(".chip").forEach(function (b) {
+          b.classList.toggle("on", b.dataset.view === v);
+        });
+        renderList();
+      }
+
+      // ---------- 事件绑定 ----------
+      searchInput.addEventListener("input", function () {
+        state.q = searchInput.value.trim();
+        state.page = 1;
+        renderList();
+      });
+
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) &&
+            shareView.classList.contains("hidden") && quickBox.classList.contains("hidden")) {
+          e.preventDefault();
+          searchInput.focus();
+        }
+        if (e.key === "Escape" && !quickBox.classList.contains("hidden")) closeQuick();
+      });
+
+      tagBar.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-tag]");
+        if (!b) return;
+        state.tag = b.dataset.tag;
+        state.page = 1;
+        renderTags();
+        renderList();
+      });
+
+      timeBar.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-range]");
+        if (!b) return;
+        state.range = b.dataset.range;
+        state.page = 1;
+        timeBar.querySelectorAll(".chip").forEach(function (x) {
+          x.classList.toggle("on", x === b);
+        });
+        renderList();
+      });
+
+      viewBtns.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-view]");
+        if (b) switchView(b.dataset.view);
+      });
+
+      pager.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-page]");
+        if (!b) return;
+        state.page = parseInt(b.dataset.page, 10);
+        renderList();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+
+      memoList.addEventListener("click", function (e) {
+        // 复选框点击交给 memos-list 模块处理（通过 memos:list 挂钩绑定 change 事件）
+        var opBtn = e.target.closest(".memo-op");
+        if (opBtn) {
+          var card = opBtn.closest(".memo-card");
+          handleOp(card.dataset.id, opBtn.dataset.op, card);
+          return;
+        }
+        var tagBtn = e.target.closest(".memo-tag");
+        if (tagBtn) {
+          state.tag = tagBtn.dataset.tag;
+          state.page = 1;
+          renderTags();
+          renderList();
+        }
+      });
+
+      fabAdd.addEventListener("click", function () {
+        if (!GB.auth.check()) { GB.auth.requireLogin(); return; }
+        openQuick();
+      });
+      document.getElementById("guestLoginBtn").addEventListener("click", function () {
+        GB.auth.requireLogin();
+      });
+      document.getElementById("qPublish").addEventListener("click", quickPublish);
+      document.getElementById("qCancel").addEventListener("click", closeQuick);
+      qContent.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          quickPublish();
+        }
+      });
+
+      // ---------- 路由与初始化 ----------
+      function route() {
+        var sp = new URLSearchParams(location.search);
+        var shareToken = sp.get("share"), id = sp.get("id");
+        if (shareToken && id) {
+          renderShare(id, shareToken);
+          return;
+        }
+        listView.classList.remove("hidden");
+        shareView.classList.add("hidden");
+        var logged = GB.auth.check();
+        fabAdd.classList.toggle("hidden", !logged);
+        guestTip.classList.toggle("hidden", logged);
+        reload();
+      }
+
+      function waitAuth(cb, n) {
+        // auth 模块属 "*" 全局模块，异步加载，这里轮询等待其就绪（最长约 1.5s）
+        if (GB.auth) return cb();
+        if (n > 30) return cb();
+        setTimeout(function () { waitAuth(cb, (n || 0) + 1); }, 50);
+      }
+
+      window.GB_MEMOS = { store: store, reload: reload, lastListPayload: null, lastDetailPayload: null };
+
+      GB.on("auth:changed", function () { route(); });
+
+      GB.renderNav("memos");
+      waitAuth(function () {
+        // 探测运行模式（后端 / 静态）
+        GB.load().then(function () { GB.track(); }).catch(function () {}).finally(function () { route(); });
+      });
+    })();
+  </script>
+</body>
+</html>

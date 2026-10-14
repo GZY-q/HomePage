@@ -1,5 +1,5 @@
 /* ============================================================
-   GlassBlog 内容数据契约（schema v2）
+   GlassBlog 内容数据契约（schema v3）
 
    单点职责：所有「字段规范化 / 版本迁移 / slug 与时间语义」
    只在本文件定义，浏览器与 Node 服务端共用（UMD）：
@@ -8,14 +8,15 @@
 
    content.json 顶层结构：
    {
-     "schemaVersion": 2,     // 契约版本；缺失视为 v0，load/save 时自动迁移
+     "schemaVersion": 3,     // 契约版本；缺失视为 v0，load/save 时自动迁移
      "rev": 1,               // 服务端维护的修订号，PUT 乐观锁（防多端覆盖）
-     "profile":  { name, bio, avatar, socials[] },
-     "posts":    [ Post ],
-     "projects": [ Project ],
-     "memos":      [ Memo ],      // v2 新增：碎片笔记
-     "agentTasks": [ AgentTask ]  // v2 新增：定时任务定义
-   }
+    "profile":  { name, bio, avatar, socials[] },
+    "posts":    [ Post ],
+    "projects": [ Project ],
+    "memos":      [ Memo ],      // v2 新增：碎片笔记
+    "agentTasks": [ AgentTask ], // v2 新增：定时任务定义
+    "botAliases": [ { name, command } ]  // v3 新增：Bot 快捷别名（≤20 条，单层替换禁递归）
+  }
 
    Post 字段（v1）：
      id         内部主键，创建后不变（"post-xxx"），不出现于 URL
@@ -40,7 +41,9 @@
      visibility  "public" | "private"（默认 private）
      pinned      置顶标记（默认 false）
      archived    归档标记（默认 false）
-     share       分享配置 { enabled, token, expireAt }
+     share       分享配置 { enabled, tokenHash, expireAt }（仅存令牌哈希，明文不落盘）
+    botReplies  Bot 回复追加记录数组 [{ id, cmdHash, text, ts }]（v3 新增；
+               仅追加，不改 content、不增 rev；cmdHash=SHA-256(指令文本) 用于幂等）
      createdAt / updatedAt  创建与最近更新时刻（ISO 8601 带时区偏移）
      attachments 附件数组
      rev         单条修订号（默认 1，单独更新 memo 时自增）
@@ -59,7 +62,8 @@
      lastRunAt / nextRunAt / lastStatus  运行时状态（默认 null，由调度器维护）
 
    迁移约定：migrate() 幂等，可把任意旧版数据升到当前版本；
-   v0 → v1：补 slug / createdAt / updatedAt；v1 → v2：补 memos / agentTasks。
+   v0 → v1：补 slug / createdAt / updatedAt；v1 → v2：补 memos / agentTasks；
+   v2 → v3：补 botAliases。
    调用时机 = 每次 load 后（前端/服务端 GET）与每次 PUT 写入前。
    ============================================================ */
 (function (root, factory) {
@@ -67,7 +71,7 @@
   if (typeof module === "object" && module.exports) module.exports = api; // Node
   else root.GBSchema = api;                                               // 浏览器
 })(typeof self !== "undefined" ? self : this, function () {
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
 
   /* ---------- 本地时区工具 ----------
      new Date().toISOString() 是 UTC，东八区 0–8 点会得到"昨天"。
@@ -118,9 +122,11 @@
     const sh = m.share && typeof m.share === "object" ? m.share : {};
     m.share = {
       enabled: !!sh.enabled,
-      token: sh.token || "",
+      // 只存令牌哈希，明文令牌只在生成时返回一次（服务端持 crypto，负责换算）
+      tokenHash: sh.tokenHash || "",
       expireAt: sh.expireAt || null,
     };
+    m.botReplies = Array.isArray(m.botReplies) ? m.botReplies : []; // Bot 回复追加记录
     m.createdAt = m.createdAt || nowISO();
     m.updatedAt = m.updatedAt || m.createdAt;
     m.attachments = Array.isArray(m.attachments) ? m.attachments : [];
@@ -160,6 +166,13 @@
     if (!Array.isArray(data.projects)) data.projects = [];
     if (!Array.isArray(data.memos)) data.memos = [];         // v2 新增
     if (!Array.isArray(data.agentTasks)) data.agentTasks = []; // v2 新增
+    // v3 新增：Bot 快捷别名（过滤非法项，上限 20 条）
+    if (!Array.isArray(data.botAliases)) data.botAliases = [];
+    data.botAliases = data.botAliases
+      .filter((a) => a && typeof a.name === "string" && a.name.trim() &&
+        typeof a.command === "string" && a.command.trim())
+      .slice(0, 20)
+      .map((a) => ({ name: a.name.trim().slice(0, 32), command: a.command.trim().slice(0, 2000) }));
 
     const taken = new Set(); // 保证全站 slug 唯一
     data.posts.forEach((p) => {

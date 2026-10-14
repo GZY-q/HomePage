@@ -1,7 +1,46 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "rev": 4,
-  "memos": [],
+  "memos": [
+    {
+      "id": "memo-mv7ntn2an9m1",
+      "content": "今天要上班",
+      "tags": [],
+      "visibility": "private",
+      "pinned": false,
+      "archived": false,
+      "attachments": [],
+      "share": {
+        "enabled": false,
+        "tokenHash": "",
+        "expireAt": null
+      },
+      "createdAt": "2026-10-14T13:18:59+08:00",
+      "updatedAt": "2026-10-14T13:18:59+08:00",
+      "rev": 1,
+      "botReplies": []
+    },
+    {
+      "id": "memo-mv6opb9bl74x",
+      "content": "# 测试备忘\n\n- [ ] 任务一\n- [ ] 任务二",
+      "tags": [
+        "测试"
+      ],
+      "visibility": "private",
+      "pinned": false,
+      "archived": false,
+      "attachments": [],
+      "share": {
+        "enabled": false,
+        "tokenHash": "",
+        "expireAt": null
+      },
+      "createdAt": "2026-10-13T20:55:51+08:00",
+      "updatedAt": "2026-10-14T13:20:43+08:00",
+      "rev": 4,
+      "botReplies": []
+    }
+  ],
   "agentTasks": [],
   "profile": {
     "name": "Gede",
@@ -40,7 +79,8 @@
       ],
       "status": "published",
       "excerpt": "介绍本站的液态玻璃设计系统：backdrop-filter、CSS 变量与深色模式的一体化方案。",
-      "content": "## 为什么是液态玻璃\n\n苹果在近年系统设计中大量使用**半透明磨砂材质**。它的核心只有一行 CSS：\n\n```css\nbackdrop-filter: blur(18px) saturate(160%);\n```\n\n配合半透明白色描边与极淡阴影，就能得到干净、通透的卡片质感。\n\n## 本站的实现\n\n- 所有样式参数集中在 `assets/css/glass.css` 顶部的 CSS 变量\n- 深色 / 浅色模式只是切换一组变量\n- 内容全部来自 `data/content.json`，改文件即改站点\n\n> 少即是多。能不加的装饰，一律不加。"
+      "content": "## 为什么是液态玻璃\n\n苹果在近年系统设计中大量使用**半透明磨砂材质**。它的核心只有一行 CSS：\n\n```css\nbackdrop-filter: blur(18px) saturate(160%);\n```\n\n配合半透明白色描边与极淡阴影，就能得到干净、通透的卡片质感。\n\n## 本站的实现\n\n- 所有样式参数集中在 `assets/css/glass.css` 顶部的 CSS 变量\n- 深色 / 浅色模式只是切换一组变量\n- 内容全部来自 `data/content.json`，改文件即改站点\n\n> 少即是多。能不加的装饰，一律不加。",
+      "cover": ""
     },
     {
       "id": "markdown-workflow",
@@ -55,7 +95,8 @@
       ],
       "status": "published",
       "excerpt": "从草稿到发布：一篇文章在后台编辑器里的完整生命周期。",
-      "content": "## 草稿先行\n\n后台的文章有三种状态：**草稿、已发布、已下架**。写作时先存草稿，满意后再发布。\n\n## 实时预览\n\n编辑器左侧写 Markdown，右侧即时渲染，支持：\n\n1. 标题、列表、引用\n2. 代码块高亮\n3. 图片与表格\n\n## 发布之后\n\n文章持久化在 JSON 中，导出一键备份，随时可以恢复默认内容。"
+      "content": "## 草稿先行\n\n后台的文章有三种状态：**草稿、已发布、已下架**。写作时先存草稿，满意后再发布。\n\n## 实时预览\n\n编辑器左侧写 Markdown，右侧即时渲染，支持：\n\n1. 标题、列表、引用\n2. 代码块高亮\n3. 图片与表格\n\n## 发布之后\n\n文章持久化在 JSON 中，导出一键备份，随时可以恢复默认内容。",
+      "cover": ""
     },
     {
       "id": "tools-i-use",
@@ -69,7 +110,8 @@
       ],
       "status": "published",
       "excerpt": "一份克制清单：编辑器、终端、设计工具与自动化脚本。",
-      "content": "## 编辑器\n\n一切以快为先，启动速度比插件数量重要。\n\n## 终端\n\n一个 shell 主题 + 三个别名，胜过一堆花哨配置。\n\n```bash\nalias gs='git status'\nalias serve='python3 -m http.server 8899'\n```\n\n## 原则\n\n工具服务于作品，而不是反过来。"
+      "content": "## 编辑器\n\n一切以快为先，启动速度比插件数量重要。\n\n## 终端\n\n一个 shell 主题 + 三个别名，胜过一堆花哨配置。\n\n```bash\nalias gs='git status'\nalias serve='python3 -m http.server 8899'\n```\n\n## 原则\n\n工具服务于作品，而不是反过来。",
+      "cover": ""
     },
     {
       "id": "static-blog-philosophy",
@@ -84,7 +126,8 @@
       ],
       "status": "published",
       "excerpt": "参考 Astro / Hexo 的内容管理思路，但把构建步骤彻底去掉。",
-      "content": "## 借鉴开源项目的部分\n\nHexo 与 Astro 的共同点是：**内容即数据**。本站同样把文章、软件项目、个人信息都放在 `data/content.json`。\n\n## 放弃的部分\n\n没有 Node 构建、没有打包器。HTML + Tailwind CDN + 原生 JS，改完即上线。\n\n## 适合的场景\n\n个人主页、作品集、软件发布页——更新频率低、追求稳定与加载速度的站点。"
+      "content": "## 借鉴开源项目的部分\n\nHexo 与 Astro 的共同点是：**内容即数据**。本站同样把文章、软件项目、个人信息都放在 `data/content.json`。\n\n## 放弃的部分\n\n没有 Node 构建、没有打包器。HTML + Tailwind CDN + 原生 JS，改完即上线。\n\n## 适合的场景\n\n个人主页、作品集、软件发布页——更新频率低、追求稳定与加载速度的站点。",
+      "cover": ""
     },
     {
       "id": "draft-example",
@@ -98,7 +141,8 @@
       ],
       "status": "draft",
       "excerpt": "这是一篇草稿，前台不会显示。",
-      "content": "草稿内容，仅后台可见。"
+      "content": "草稿内容，仅后台可见。",
+      "cover": ""
     }
   ],
   "projects": [
@@ -149,5 +193,6 @@
         }
       ]
     }
-  ]
+  ],
+  "botAliases": []
 }

@@ -287,51 +287,23 @@ window.GB = (function () {
         `<a href="${l.href}" class="px-4 py-2.5 sm:py-1.5 rounded-full text-sm whitespace-nowrap shrink-0 ${
           l.key === active ? "text-accent font-medium" : "text-secondary hover:text-[var(--text)]"
         }">${l.label}</a>`).join("") +
-      `<span id="navAuthArea" class="flex items-center shrink-0"></span>` +
       `<button id="themeBtn" onclick="GB.toggleTheme()" aria-label="切换主题"
         class="ml-1 w-9 h-9 sm:w-8 sm:h-8 rounded-full glass-sm flex items-center justify-center text-sm shrink-0">☾</button>`;
     updateThemeIcon();
-    renderNavAuth();
-    // auth 模块经 loadModules 异步加载，首次渲染时可能尚未就绪：延迟再渲染一次右侧
-    setTimeout(renderNavAuth, 100);
     loadModules(); // 导航就绪即加载当前页模块（异步，不阻塞页面）
   }
 
-  /* 导航右侧登录态区域：未登录显示「登录」按钮；已登录显示头像下拉菜单 */
-  function renderNavAuth() {
-    const area = document.getElementById("navAuthArea");
-    if (!area) return;
-    const loggedIn = GB.auth ? GB.auth.check() : false;
-    if (!loggedIn) {
-      area.innerHTML =
-        `<button id="navLoginBtn" type="button"
-          class="ml-1 px-3.5 h-9 sm:h-8 rounded-full glass-sm text-sm whitespace-nowrap">登录</button>`;
-      area.querySelector("#navLoginBtn").onclick = () => GB.auth && GB.auth.requireLogin();
-      return;
-    }
-    area.innerHTML =
-      `<span class="relative shrink-0">
-        <button id="navUserBtn" type="button" aria-label="账户菜单"
-          class="ml-1 w-9 h-9 sm:w-8 sm:h-8 rounded-full glass-sm flex items-center justify-center text-sm">◎</button>
-        <span id="navUserMenu" hidden class="glass absolute right-0 mt-2 py-1.5 text-sm whitespace-nowrap z-50"
-          style="display:block;border-radius:calc(var(--glass-radius) / 2);min-width:7.5rem;">
-          <a href="admin.html" class="block px-4 py-2 hover:text-accent">管理后台</a>
-          <button id="navLogoutBtn" type="button"
-            class="block w-full text-left px-4 py-2 hover:text-accent">退出登录</button>
-        </span>
-      </span>`;
-    const menu = area.querySelector("#navUserMenu");
-    area.querySelector("#navUserBtn").onclick = (e) => {
-      e.stopPropagation(); // 防止触发 document 的收起逻辑
-      menu.hidden = !menu.hidden;
-    };
-    area.querySelector("#navLogoutBtn").onclick = () => GB.auth && GB.auth.logout();
-  }
+  /* 导航不再承载登录入口（登录仅由管理后台提供）：保留空实现以兼容 auth:changed 订阅 */
+  function renderNavAuth() {}
 
-  // 点击页面其他区域自动收起导航下拉菜单
+  // 点击页面其他区域自动收起导航下拉菜单（与 renderNavAuth 一致，用 style.display 控制显隐）
   document.addEventListener("click", (e) => {
     const menu = document.getElementById("navUserMenu");
-    if (menu && !menu.hidden && !menu.contains(e.target)) menu.hidden = true;
+    if (menu && menu.style.display !== "none" && !menu.contains(e.target)) {
+      menu.style.display = "none";
+      const btn = document.getElementById("navUserBtn");
+      if (btn) btn.setAttribute("aria-expanded", "false");
+    }
   });
 
   /* ---------- 模块系统（框架核心） ----------
